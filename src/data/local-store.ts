@@ -22,9 +22,12 @@ import { round2 } from "../lib/money";
 import { beneficiariesFromOperations, upsertBeneficiaryList } from "../lib/beneficiaries";
 import { assignedCup, cancelBlockReason, confirmBlockReason, isCashKind, isDeliveryKind, workflowStatus } from "../lib/operations";
 import { seedProvinces, seedSnapshot } from "./seed";
+import { emptyCloudSnapshot, pullSnapshot, pushSnapshot, subscribeCloud } from "./cloud-store";
+import { isCloudConfigured } from "./supabase";
 import type { CardHeadroom, DashboardTotals, OperationPatch, ProvinceHeadroom, StoreApi } from "./store";
 
 const KEY = "transfer-switch.v1";
+const SESSION_KEY = "transfer-switch.session";
 
 function load(): Snapshot {
   try {
@@ -109,13 +112,75 @@ function ensureSingleOpen(snapshot: Snapshot): Snapshot {
   };
 }
 
-let state = load();
+function readSession() {
+  try {
+    return localStorage.getItem(SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeSession(userId: string | null) {
+  try {
+    if (userId) localStorage.setItem(SESSION_KEY, userId);
+    else localStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* private mode */
+  }
+}
+
+let state: Snapshot = { ...emptyCloudSnapshot(), sessionUserId: readSession() };
 const listeners = new Set<() => void>();
+let saveChain = Promise.resolve();
+let cloudUnsub: (() => void) | null = null;
+let booting: Promise<void> | null = null;
+
+function notify() {
+  listeners.forEach((fn) => fn());
+}
 
 function persist(next: Snapshot) {
+  writeSession(next.sessionUserId);
   state = next;
-  localStorage.setItem(KEY, JSON.stringify(next));
-  listeners.forEach((fn) => fn());
+  notify();
+  if (!isCloudConfigured()) {
+    localStorage.setItem(KEY, JSON.stringify(next));
+    return;
+  }
+  const snapshot = next;
+  saveChain = saveChain
+    .then(() => pushSnapshot(snapshot))
+    .catch((err) => {
+      console.error(err);
+    });
+}
+
+export async function bootStore() {
+  if (booting) return booting;
+  booting = (async () => {
+    if (!isCloudConfigured()) {
+      state = load();
+      notify();
+      return;
+    }
+    const data = await pullSnapshot();
+    state = { ...data, sessionUserId: readSession() };
+    notify();
+    if (cloudUnsub) return;
+    try {
+      cloudUnsub = subscribeCloud(() => {
+        void pullSnapshot()
+          .then((next) => {
+            state = { ...next, sessionUserId: readSession() };
+            notify();
+          })
+          .catch((err) => console.error(err));
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  })();
+  return booting;
 }
 
 function requireSession(): Profile {
@@ -233,10 +298,16 @@ function apiFrom(snapshot: Snapshot): StoreApi {
     login(userId: string) {
       const user = snapshot.profiles.find((p) => p.id === userId);
       if (!user?.active) throw new Error("Ese usuario no está activo.");
-      persist({ ...snapshot, sessionUserId: userId });
+      writeSession(userId);
+      state = { ...snapshot, sessionUserId: userId };
+      if (!isCloudConfigured()) localStorage.setItem(KEY, JSON.stringify(state));
+      notify();
     },
     logout() {
-      persist({ ...snapshot, sessionUserId: null });
+      writeSession(null);
+      state = { ...snapshot, sessionUserId: null };
+      if (!isCloudConfigured()) localStorage.setItem(KEY, JSON.stringify(state));
+      notify();
     },
     upsertProfile(input: {
       id?: string;
