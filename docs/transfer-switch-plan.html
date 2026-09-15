@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Transfer Switch — Plan de producto y flujo operativo</title>
+  <style>
+    @page { size: A4; margin: 16mm 16mm 18mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: #13211c;
+      background: #fff;
+      font: 11pt/1.45 "Segoe UI", Outfit, sans-serif;
+    }
+    h1, h2, h3 { font-family: Georgia, "Times New Roman", serif; letter-spacing: -0.02em; }
+    h1 { font-size: 26pt; margin: 0 0 6px; }
+    h2 { font-size: 15pt; margin: 22px 0 10px; border-bottom: 1.5px solid #16362c; padding-bottom: 4px; }
+    h3 { font-size: 12pt; margin: 16px 0 8px; }
+    p { margin: 0 0 10px; }
+    .muted { color: #3d5248; }
+    .cover {
+      min-height: 240mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      page-break-after: always;
+      background: #16362c;
+      color: #fffaf3;
+      padding: 28mm 18mm;
+      margin: -16mm;
+    }
+    .cover .kicker { color: #d7b56a; letter-spacing: 0.14em; text-transform: uppercase; font-size: 9pt; }
+    .cover h1 { color: #f0d9a0; font-size: 34pt; }
+    .cover p { max-width: 140mm; }
+    .meta { margin-top: 28px; font-size: 10pt; color: #c5d5cc; }
+    section { page-break-before: always; }
+    section:first-of-type { page-break-before: auto; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin: 12px 0 16px; }
+    .stat { border: 1px solid #cfc4b0; padding: 10px 12px; border-radius: 6px; }
+    .stat b { display: block; font-family: Georgia, serif; font-size: 16pt; }
+    .stat span { font-size: 9pt; color: #3d5248; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .card { border: 1px solid #cfc4b0; border-radius: 6px; padding: 12px 14px; }
+    .card h3 { margin-top: 0; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; font-size: 9.5pt; }
+    th, td { border: 1px solid #cfc4b0; padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { background: #16362c; color: #f0d9a0; font-weight: 600; }
+    tr:nth-child(even) td { background: #f3eee4; }
+    .note { background: #eef4f0; border-left: 4px solid #16362c; padding: 10px 12px; margin: 12px 0; }
+    .warn { background: #f8e6cc; border-left-color: #b86a1c; }
+    .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0 16px; }
+    .node {
+      border: 1.5px solid #16362c;
+      border-radius: 6px;
+      padding: 8px 10px;
+      min-width: 92px;
+      text-align: center;
+      font-size: 9pt;
+      background: #fffaf3;
+    }
+    .node.hi { border-color: #d7b56a; background: #16362c; color: #f0d9a0; }
+    .arrow { color: #16362c; font-weight: 700; }
+    .branch { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; width: 100%; align-items: start; }
+    ul { margin: 6px 0 12px; padding-left: 18px; }
+    li { margin-bottom: 4px; }
+    .toc a { color: #16362c; text-decoration: none; }
+    footer { position: running(footer); }
+    @media print {
+      .cover { margin: -16mm; }
+    }
+  </style>
+</head>
+<body>
+  <div class="cover">
+    <div class="kicker">Documento de alineación operativa</div>
+    <h1>Transfer Switch</h1>
+    <p>
+      Plan de producto y flujo real: microgestión de transferencias
+      GYN → CUP entre Guyana y Cuba. Escritorio ahora, APK después.
+    </p>
+    <p>
+      Este documento reúne las seis vistas del plan (visión, flujo diario,
+      modelo, roles, stack y fases) para compartirlo con quien opera el
+      flujo en la calle y en caja.
+    </p>
+    <div class="meta">
+      Versión de trabajo · 4 septiembre 2026<br />
+      Reloj de negocio: America/Havana<br />
+      Monedas: GYN, CUP, USDT
+    </div>
+  </div>
+
+  <section>
+    <h2>Índice</h2>
+    <ol class="toc">
+      <li>Visión</li>
+      <li>Flujo diario</li>
+      <li>Modelo</li>
+      <li>Roles</li>
+      <li>Stack</li>
+      <li>Fases y decisiones cerradas</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>1. Visión</h2>
+    <p>
+      La app coordina un corredor de liquidez entre Guyana y Cuba. Un
+      operador recoge GYN y la casa envía el equivalente en CUP desde una
+      o varias tarjetas cubanas, elegidas a mano. USDT existe como moneda
+      del sistema (cotización y montos); el flujo real de tesorería USDT
+      se define después. La tasa se publica como CUP por cada 1 000 GYN,
+      por día o por semana, con reloj de La Habana.
+    </p>
+    <div class="stats">
+      <div class="stat"><b>3</b><span>Monedas: GYN, CUP, USDT</span></div>
+      <div class="stat"><b>2</b><span>Modos de operación</span></div>
+      <div class="stat"><b>2</b><span>Roles: admin y operador</span></div>
+      <div class="stat"><b>2</b><span>Clientes: escritorio, luego APK</span></div>
+    </div>
+    <div class="two">
+      <div class="card">
+        <h3>Problema operativo</h3>
+        <p>Varias tarjetas, cada una con tope diario y mensual. Sin un tablero compartido, dos operadores pueden saturar la misma tarjeta o dejar saldo ocioso en otra.</p>
+        <p class="muted">La tasa GYN–CUP cambia cada día. Si no se fija en la apertura, cada operación queda a criterio y el cierre contable no cuadra.</p>
+      </div>
+      <div class="card">
+        <h3>Promesa del sistema</h3>
+        <p>Un periodo abierto, una tasa vigente, un pool de tarjetas con cupo en vivo, y cada operación atada a un contacto en Guyana con dirección en mapa.</p>
+        <p class="muted">El tablero muestra flujo transferido y por recoger, por día y por mes. Pasajes y traslados viven en un módulo aparte, con itinerarios.</p>
+      </div>
+    </div>
+    <h3>Límite de alcance v1</h3>
+    <table>
+      <thead><tr><th>Entra en v1</th><th>Queda fuera hasta v2/v3</th></tr></thead>
+      <tbody>
+        <tr><td>Alta de operadores por admin + login Google</td><td>Autoservicio del cliente final en Guyana o Cuba</td></tr>
+        <tr><td>Apertura diaria o semanal, tasa CUP × 1 000 GYN</td><td>Integración bancaria automática (Transfermóvil API)</td></tr>
+        <tr><td>Pool de tarjetas, límites, asignación manual multi-origen</td><td>Reparto automático entre tarjetas</td></tr>
+        <tr><td>Operación dual: recoger-luego-enviar o enviar-luego-recoger</td><td>Conciliación bancaria importada de extractos</td></tr>
+        <tr><td>Contacto + pin en Google Maps</td><td>Ruteo optimizado de varias recogidas</td></tr>
+        <tr><td>Tablero diario y mensual</td><td>Contabilidad fiscal / reportes a banco</td></tr>
+        <tr><td>Catálogo de pasajes y traslados con itinerario</td><td>Venta online de boletos con pago embebido</td></tr>
+      </tbody>
+    </table>
+    <div class="note">
+      <strong>Decisión de producto.</strong> No es un neobanco ni un wallet.
+      Es un tablero interno para operadores que ya mueven el dinero a mano.
+      La app registra, asigna, limita y mide; no ejecuta la transferencia en el banco cubano.
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Flujo diario</h2>
+    <p>
+      El día operativo no existe hasta que el administrador abre el periodo.
+      Solo puede haber un periodo abierto. Las fechas no se repiten ni se
+      solapan con un periodo ya usado. A partir de ahí, cada operación tiene
+      dos rieles que deben cerrar: el cobro en Guyana y el envío CUP.
+      El orden de esos rieles distingue los dos modos.
+    </p>
+    <h3>Ciclo de una operación</h3>
+    <div class="flow">
+      <div class="node">Apertura</div><span class="arrow">→</span>
+      <div class="node">Nueva operación</div><span class="arrow">→</span>
+      <div class="node">Contacto + mapa</div>
+    </div>
+    <div class="branch">
+      <div class="card">
+        <strong>Riel cobro</strong>
+        <p>Recogida GYN (USDT como moneda, no como tesorería real todavía)</p>
+      </div>
+      <span class="arrow">+</span>
+      <div class="card">
+        <strong>Riel CUP</strong>
+        <p>Asignar tarjetas a mano → transferencia CUP con referencia</p>
+      </div>
+    </div>
+    <div class="flow" style="margin-top:12px">
+      <div class="node hi">Operación cerrada</div><span class="arrow">→</span>
+      <div class="node hi">Tablero</div>
+    </div>
+    <p class="muted">Ambos rieles son obligatorios. Pueden ocurrir en cualquier orden, según el modo.</p>
+
+    <div class="two">
+      <div class="card">
+        <h3>Modo A — Recoger, luego transferir</h3>
+        <p>El asesor va a la dirección, cobra GYN, confirma la recogida y recién entonces reserva cupo en una o varias tarjetas y deja el CUP pendiente de ejecución.</p>
+        <p class="muted">Menor riesgo de crédito: el dinero ya está en caja antes de salir CUP.</p>
+      </div>
+      <div class="card">
+        <h3>Modo B — Transferir, luego recoger</h3>
+        <p>Se asignan tarjetas y se envía CUP de inmediato. La operación queda en por recoger hasta que un operador confirma el cobro en el mapa.</p>
+        <p class="muted">Más rápido para el beneficiario en Cuba; el admin ve la deuda de caja en Guyana en tiempo real.</p>
+      </div>
+    </div>
+
+    <h3>Apertura del periodo</h3>
+    <table>
+      <thead><tr><th>Paso</th><th>Actor</th><th>Qué queda fijado</th></tr></thead>
+      <tbody>
+        <tr><td>1. Abrir periodo</td><td>Admin</td><td>Día o semana, cotización CUP por cada 1 000 GYN, notas. Un solo abierto; fechas únicas.</td></tr>
+        <tr><td>2. Tasa vigente</td><td>Admin</td><td>Ejemplo: 1 000 GYN = X CUP, según el cambio del día o de la semana.</td></tr>
+        <tr><td>3. Operar</td><td>Operadores</td><td>Cada operación copia la tasa de esa apertura; no flota.</td></tr>
+        <tr><td>4. Cerrar</td><td>Admin</td><td>Se congelan altas nuevas en ese periodo. Hay que cerrar para abrir otro.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Asignación de tarjeta (manual, multi-origen)</h3>
+    <p>
+      Un envío puede superar el tope de una sola tarjeta. El operador arma
+      la transferencia a mano: una o varias tarjetas disponibles, con montos
+      que sumen el CUP. El sistema muestra cupo diario, mensual y saldo; no
+      reparte solo. Cada tramo reserva cupo de forma atómica.
+    </p>
+    <table>
+      <thead><tr><th>Regla</th><th>Comportamiento</th></tr></thead>
+      <tbody>
+        <tr><td>Candidata a mostrar</td><td>Activa, con saldo y algún cupo diario o mensual restante</td></tr>
+        <tr><td>Elección</td><td>Manual. El operador combina orígenes hasta cubrir el CUP</td></tr>
+        <tr><td>Suma de tramos</td><td>Debe igualar el monto CUP de la operación</td></tr>
+        <tr><td>Tope por tramo</td><td>Cada tramo respeta saldo, diario y mensual de ESA tarjeta</td></tr>
+        <tr><td>Timezone de límites</td><td>America/Havana</td></tr>
+        <tr><td>Confirmación humana</td><td>Referencia de texto por origen. Captura o SMS del banco: después</td></tr>
+      </tbody>
+    </table>
+    <div class="note warn">
+      <strong>Concurrencia.</strong> El punto crítico no es la UI, es el lock de cupo.
+      Sin transacción en base de datos, el límite diario se rompe en cuanto haya dos operadores a la vez.
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Modelo</h2>
+    <p>El modelo gira alrededor de la operación. Todo lo demás existe para crearla con tasa fija, tarjeta válida y un lugar donde recoger.</p>
+    <h3>Entidades</h3>
+    <table>
+      <thead><tr><th>Entidad</th><th>Responsabilidad</th><th>Campos clave</th></tr></thead>
+      <tbody>
+        <tr><td>Usuario</td><td>Identidad Google ya autorizada por el admin</td><td>email, rol, activo, nombre, teléfono</td></tr>
+        <tr><td>Apertura / periodo</td><td>Congela el tramo operativo (día o semana)</td><td>inicio, fin, CUP × 1 000 GYN, estado, abiertaPor</td></tr>
+        <tr><td>Tarjeta</td><td>Fuente de liquidez CUP</td><td>alias, banco, saldoCUP, límite diario, límite mensual</td></tr>
+        <tr><td>MovimientoTarjeta</td><td>Reserva y consumo de cupo</td><td>tarjeta, operación, CUP, fecha Havana, tipo</td></tr>
+        <tr><td>Contacto</td><td>Persona a recoger en Guyana</td><td>nombre, teléfono, dirección, lat, lng</td></tr>
+        <tr><td>Operación</td><td>Unidad de trabajo cobro + envío</td><td>modo, montos, tasa aplicada, estados de cada riel</td></tr>
+        <tr><td>Origen CUP (tramo)</td><td>Una tarjeta dentro de un envío partido</td><td>tarjeta, monto CUP, referencia, estado</td></tr>
+        <tr><td>OfertaViaje</td><td>Pasaje o traslado vendible</td><td>tipo, precio por moneda, cupos, vigencia</td></tr>
+        <tr><td>TramoItinerario</td><td>Escala o tramo de un viaje</td><td>origen, destino, fechaHora, vehículo o vuelo</td></tr>
+      </tbody>
+    </table>
+    <div class="two">
+      <div class="card">
+        <h3>Riel CUP</h3>
+        <p>borrador → cupo reservado → transferida (con referencia) | fallida | cancelada. Solo <em>transferida</em> consume límite de forma definitiva; <em>fallida</em> libera la reserva.</p>
+      </div>
+      <div class="card">
+        <h3>Riel cobro</h3>
+        <p>pendiente → en ruta (opcional) → recogida | impaga | cancelada. El tablero de por recoger suma GYN (y USDT cuando aplique) en pendiente + en ruta.</p>
+      </div>
+    </div>
+    <h3>Monedas</h3>
+    <table>
+      <thead><tr><th>Moneda</th><th>Dónde vive</th><th>Cómo se usa</th></tr></thead>
+      <tbody>
+        <tr><td>GYN</td><td>Caja Guyana / riel cobro</td><td>Efectivo recogido. Se convierte a CUP con la tasa del periodo.</td></tr>
+        <tr><td>USDT</td><td>Moneda del sistema</td><td>Cotizable y visible. El manejo real de tesorería se explica después.</td></tr>
+        <tr><td>CUP</td><td>Saldo de tarjetas cubanas</td><td>Única moneda que sale por transferencia. Nunca se recoge en Guyana.</td></tr>
+      </tbody>
+    </table>
+    <h3>Tablero</h3>
+    <p>Dos granos de tiempo, mismos indicadores. Para comparar cobro pendiente contra CUP salido se convierte GYN a CUP con la tasa de la apertura de ese día.</p>
+    <table>
+      <thead><tr><th>Indicador</th><th>Grano</th><th>Fórmula</th></tr></thead>
+      <tbody>
+        <tr><td>CUP transferido</td><td>Día y mes</td><td>Suma de orígenes CUP en estado transferida</td></tr>
+        <tr><td>Por recoger GYN</td><td>Día y mes</td><td>Suma GYN con riel cobro pendiente o en ruta</td></tr>
+        <tr><td>Por recoger USDT</td><td>Día y mes</td><td>Cuando aplique, suma USDT pendiente o en ruta</td></tr>
+        <tr><td>Equivalente CUP por recoger</td><td>Día y mes</td><td>Pendientes × tasa de su apertura</td></tr>
+        <tr><td>Cupo tarjetas</td><td>En vivo</td><td>límite − consumido, diario y mensual, por tarjeta</td></tr>
+      </tbody>
+    </table>
+    <h3>Módulo de pasajes y traslados</h3>
+    <p>
+      Línea de negocio paralela, no mezclada con el pool de tarjetas.
+      Una oferta tiene precio en GYN, USDT y CUP, un itinerario ordenado
+      de tramos, y un estado (borrador, publicada, agotada, archivada).
+      Tipos: pasaje aéreo y traslado terrestre/personal. Admin y operador
+      cargan, editan y publican. v1 no cobra el boleto dentro de la app.
+    </p>
+  </section>
+
+  <section>
+    <h2>4. Roles</h2>
+    <p>
+      Nadie se autoregistra. El administrador carga el email de Google del
+      operador; el primer login solo entra si ese email está activo en la
+      lista. Google autentica; Transfer Switch autoriza.
+    </p>
+    <div class="two">
+      <div class="card">
+        <h3>Administrador</h3>
+        <ul>
+          <li>Registrar, desactivar y reasignar operadores.</li>
+          <li>Abrir y cerrar el periodo; fijar la tasa CUP × 1 000 GYN.</li>
+          <li>Alta de tarjetas, límites y bloqueos.</li>
+          <li>Ver tablero global y todas las operaciones.</li>
+          <li>Publicar ofertas de pasajes y traslados.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Asesor / operador</h3>
+        <ul>
+          <li>Crear operaciones del periodo abierto.</li>
+          <li>Ver contacto, teléfono y abrir Google Maps.</li>
+          <li>Confirmar recogida y confirmar envío CUP (referencia).</li>
+          <li>Elegir a mano una o varias tarjetas; ver cupo, no editar límites.</li>
+          <li>Gestionar itinerarios de pasajes y traslados.</li>
+        </ul>
+      </div>
+    </div>
+    <h3>Secuencia de acceso</h3>
+    <table>
+      <thead><tr><th>Paso</th><th>Qué ocurre si falla</th></tr></thead>
+      <tbody>
+        <tr><td>Admin crea usuario con email Google y rol</td><td>El email no existe en la app: login Google se rechaza</td></tr>
+        <tr><td>Operador entra con cuenta Google</td><td>Email distinto al registrado: acceso denegado, sin alta automática</td></tr>
+        <tr><td>Sesión válida + usuario activo</td><td>Usuario desactivado: entra a Google pero la API responde 403</td></tr>
+        <tr><td>Hay periodo abierto vigente</td><td>Sin periodo abierto el operador no crea operaciones; solo consulta</td></tr>
+      </tbody>
+    </table>
+    <div class="note">
+      <strong>Multi-usuario.</strong> Varios operadores comparten el mismo pool de tarjetas
+      y el mismo periodo abierto. Las pantallas de cupo y de por recoger se actualizan
+      en tiempo real para que nadie trabaje con un límite ya gastado.
+    </div>
+  </section>
+
+  <section>
+    <h2>5. Stack</h2>
+    <p>
+      Cliente web de escritorio ahora (varios operadores en el navegador);
+      el mismo código hacia APK con Capacitor. El servidor es SQL: los
+      límites de tarjeta necesitan transacción.
+    </p>
+    <div class="stats" style="grid-template-columns: 1fr 1fr 1fr;">
+      <div class="stat"><b>React</b><span>Cliente escritorio web, luego APK</span></div>
+      <div class="stat"><b>Supabase</b><span>Auth Google, Postgres, realtime</span></div>
+      <div class="stat"><b>Maps</b><span>Google Maps en escritorio y móvil</span></div>
+    </div>
+    <table>
+      <thead><tr><th>Capa</th><th>Elección</th><th>Motivo</th></tr></thead>
+      <tbody>
+        <tr><td>Cliente v1</td><td>React + Vite</td><td>Varios operadores a la vez sin instalar .exe. Flutter Windows exige Visual Studio C++.</td></tr>
+        <tr><td>Cliente v3</td><td>Capacitor sobre el mismo React</td><td>El APK reutiliza pantallas. Mapa nativo en el teléfono.</td></tr>
+        <tr><td>Auth</td><td>Google vía Supabase Auth</td><td>El operador pide Google; el admin autoriza el email.</td></tr>
+        <tr><td>Datos</td><td>PostgreSQL (Supabase)</td><td>UPDATE atómico de saldo y cupos; fechas de periodo sin solape.</td></tr>
+        <tr><td>Tiempo real</td><td>Supabase Realtime</td><td>Cupo de tarjetas y cola por recoger se refrescan en todos los escritorios.</td></tr>
+        <tr><td>Mapas</td><td>Google Maps</td><td>v1: abrir la dirección. APK: mapa embebido.</td></tr>
+        <tr><td>Reglas</td><td>Row Level Security + RPC</td><td>Límites y tasas: admin. Viajes: admin y operador. Operaciones: ambos.</td></tr>
+      </tbody>
+    </table>
+    <div class="note">
+      Flutter sigue siendo válido el día que haya SDK + Visual Studio.
+      Para arrancar, el núcleo corre como app web de escritorio, con el mismo
+      modelo de datos que exigiría el APK.
+    </div>
+    <div class="two">
+      <div class="card">
+        <h3>Escritorio (v1)</h3>
+        <ul>
+          <li>Login Google</li>
+          <li>Tablero del día / mes</li>
+          <li>Apertura (solo admin)</li>
+          <li>Operaciones (lista + ficha)</li>
+          <li>Tarjetas y cupos</li>
+          <li>Operadores (solo admin)</li>
+          <li>Viajes e itinerarios (admin y operador)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>APK (v3)</h3>
+        <ul>
+          <li>Mismo backend, mismos roles</li>
+          <li>Mapa nativo de la recogida</li>
+          <li>Confirmar cobro en campo</li>
+          <li>Llamar al contacto</li>
+          <li>Ver cupo restante</li>
+          <li>Itinerarios en consulta</li>
+          <li>Push de operaciones asignadas</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. Fases y decisiones cerradas</h2>
+    <p>Tres entregas. No se construye el APK hasta que el escritorio ya opera un día real: apertura, operación, tarjeta y tablero.</p>
+    <div class="two" style="grid-template-columns: 1fr 1fr 1fr;">
+      <div class="card">
+        <h3>Fase 1 — Núcleo (ahora)</h3>
+        <p>Auth, roles, apertura, tarjetas, operaciones dual-mode, contacto con link de mapa, tablero diario y mensual, periodos únicos.</p>
+      </div>
+      <div class="card">
+        <h3>Fase 2 — Ampliación</h3>
+        <p>Ofertas de pasajes y traslados con itinerarios, USDT como cobro de primer nivel cuando se defina el flujo real, avisos de cupo y de por recoger.</p>
+      </div>
+      <div class="card">
+        <h3>Fase 3 — Móvil</h3>
+        <p>APK Android, mapa nativo, confirmar recogida en campo, llamada al contacto, avisos push. Mismo cliente React vía Capacitor.</p>
+      </div>
+    </div>
+    <h3>Criterio de hecho — fase 1</h3>
+    <table>
+      <thead><tr><th>Pieza</th><th>Está hecho cuando…</th></tr></thead>
+      <tbody>
+        <tr><td>Auth Google + lista blanca</td><td>Un admin invita un email, esa persona entra con Google, un email no invitado es rechazado, un usuario desactivado recibe 403.</td></tr>
+        <tr><td>Apertura</td><td>Sin periodo abierto no se crean operaciones. Toda operación guarda la tasa de su apertura. Un solo abierto; fechas sin solape. Cerrar bloquea altas nuevas.</td></tr>
+        <tr><td>Tarjetas</td><td>Dos reservas simultáneas no pueden superar el límite. Una transferencia fallida libera cupo. El mensual se reinicia el día 1 en horario de La Habana.</td></tr>
+        <tr><td>Operaciones</td><td>Se puede completar cobro antes o después del CUP. Cada ficha tiene contacto, teléfono y dirección. Los dos rieles deben cerrar.</td></tr>
+        <tr><td>Mapas</td><td>Desde la ficha, un clic abre Google Maps en la coordenada o la dirección.</td></tr>
+        <tr><td>Tablero</td><td>CUP salido y equivalente por recoger, agrupado por día y por mes, separado por GYN (y USDT cuando aplique).</td></tr>
+      </tbody>
+    </table>
+    <h3>Decisiones ya cerradas (2 sep 2026)</h3>
+    <table>
+      <thead><tr><th>Tema</th><th>Cerrado</th><th>Cómo queda</th></tr></thead>
+      <tbody>
+        <tr><td>USDT</td><td>Moneda del sistema</td><td>Se cotiza y se muestra. El manejo real de tesorería USDT se define después, con quien opera el flujo.</td></tr>
+        <tr><td>Split de tarjetas</td><td>Multi-origen manual</td><td>Un envío puede combinar varias tarjetas. El operador elige; la app no reparte sola.</td></tr>
+        <tr><td>Timezone</td><td>America/Havana</td><td>Apertura, límites diario/mensual y tablero cortan al reloj de Cuba.</td></tr>
+        <tr><td>Ejecución CUP</td><td>Referencia de texto</td><td>Captura de pantalla o SMS del banco cubano: fase posterior.</td></tr>
+        <tr><td>Ofertas / tasa</td><td>CUP por cada 1 000 GYN</td><td>Apertura de día o semana. Ejemplo: 1 000 GYN = X CUP, según el cambio vigente.</td></tr>
+        <tr><td>Viajes</td><td>Admin y operador</td><td>Ambos gestionan pasajes, traslados e itinerarios.</td></tr>
+        <tr><td>Periodos</td><td>Únicos, sin solape</td><td>Un solo periodo abierto. Las fechas no se reutilizan.</td></tr>
+      </tbody>
+    </table>
+    <div class="note">
+      <strong>Para quien hace el flujo real.</strong> Este plan describe cómo
+      la casa quiere registrar lo que ya ocurre en la calle: recogida en
+      Guyana, envío CUP desde tarjetas con tope, tasa del día y contacto
+      con mapa. Lo que no coincida con la práctica diaria hay que marcarlo
+      aquí antes de seguir construyendo.
+    </div>
+  </section>
+</body>
+</html>

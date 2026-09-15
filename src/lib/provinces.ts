@@ -1,0 +1,18 @@
+export const CUBA_PROVINCES = [
+  { code: "PRI", name: "Pinar del Río" },
+  { code: "ART", name: "Artemisa" },
+  { code: "HAB", name: "La Habana" },
+  { code: "MAY", name: "Mayabeque" },
+  { code: "MAT", name: "Matanzas" },
+  { code: "CFG", name: "Cienfuegos" },
+  { code: "VCL", name: "Villa Clara" },
+  { code: "SSP", name: "Sancti Spíritus" },
+  { code: "CAV", name: "Ciego de Ávila" },
+  { code: "CMG", name: "Camagüey" },
+  { code: "LTU", name: "Las Tunas" },
+  { code: "HOL", name: "Holguín" },
+  { code: "GRA", name: "Granma" },
+  { code: "SCU", name: "Santiago de Cuba" },
+  { code: "GTM", name: "Guantánamo" },
+  { code: "IJV", name: "Isla de la Juventud" },
+] as const;
