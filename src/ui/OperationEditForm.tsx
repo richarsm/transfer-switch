@@ -1,8 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useStore } from "../data/StoreContext";
 import type { Operation } from "../domain/types";
+import { formatCardNumber } from "../lib/cards";
 import { parseAmount } from "../lib/money";
-import { cubaPayoutDone, isCashKind } from "../lib/operations";
+import { cubaPayoutDone } from "../lib/operations";
+import { CashDeliveryFields } from "./CashDeliveryFields";
 
 type Props = {
   operation: Operation;
@@ -37,14 +39,28 @@ export function OperationEditForm({ operation, onSave }: Props) {
   const [lng, setLng] = useState(operation.lng != null ? String(operation.lng) : "");
   const [cubaPhone, setCubaPhone] = useState(operation.cubaPhone);
   const [cubaRecipientName, setCubaRecipientName] = useState(operation.cubaRecipientName);
-  const [cubaCardNumber, setCubaCardNumber] = useState(operation.cubaCardNumber ?? "");
+  const [cubaCardNumber, setCubaCardNumber] = useState(formatCardNumber(operation.cubaCardNumber ?? ""));
   const [cubaAddress, setCubaAddress] = useState(operation.cubaAddress);
   const [provinceId, setProvinceId] = useState(operation.provinceId);
+  const [courierId, setCourierId] = useState("");
+  const [cubaMapLat, setCubaMapLat] = useState("");
+  const [cubaMapLng, setCubaMapLng] = useState("");
   const [gyn, setGyn] = useState(String(operation.amountGyn));
   const [payout, setPayout] = useState(
     String(operation.kind === "cash_usd" ? operation.amountUsd : operation.amountCup),
   );
   const [notes, setNotes] = useState(operation.notes);
+  const [error, setError] = useState<string | null>(null);
+
+  function matchCourier(province: string, name: string) {
+    const needle = name.trim().toLowerCase();
+    if (!province || !needle) return "";
+    return (
+      (store.snapshot.couriers ?? []).find(
+        (c) => c.active && c.provinceId === province && c.name.trim().toLowerCase() === needle,
+      )?.id ?? ""
+    );
+  }
 
   useEffect(() => {
     setContactName(operation.contactName);
@@ -54,20 +70,29 @@ export function OperationEditForm({ operation, onSave }: Props) {
     setLng(operation.lng != null ? String(operation.lng) : "");
     setCubaPhone(operation.cubaPhone);
     setCubaRecipientName(operation.cubaRecipientName);
-    setCubaCardNumber(operation.cubaCardNumber ?? "");
+    setCubaCardNumber(formatCardNumber(operation.cubaCardNumber ?? ""));
     setCubaAddress(operation.cubaAddress);
     setProvinceId(operation.provinceId);
+    setCourierId(matchCourier(operation.provinceId, operation.cubaRecipientName));
     setGyn(String(operation.amountGyn));
     setPayout(String(operation.kind === "cash_usd" ? operation.amountUsd : operation.amountCup));
     setNotes(operation.notes);
+    setError(null);
   }, [operation]);
 
   const payoutCurrency = operation.kind === "cash_usd" ? "USD" : "CUP";
-  const provinces = store.snapshot.provinces;
 
   function submit(e: FormEvent) {
     e.preventDefault();
+    if (
+      (operation.kind === "cash_cup" || operation.kind === "cash_usd") &&
+      !courierId
+    ) {
+      setError("Selecciona quién va a entregar el efectivo.");
+      return;
+    }
     const payoutN = parseAmount(payout);
+    setError(null);
     onSave({
       contactName,
       contactPhone,
@@ -105,6 +130,7 @@ export function OperationEditForm({ operation, onSave }: Props) {
       )}
       {open ? (
         <form onSubmit={submit} style={{ display: "grid", gap: 14, marginTop: 12 }}>
+          {error ? <div className="error">{error}</div> : null}
           <div className="grid-2">
             <label className="field">
               Contacto en Guyana
@@ -134,7 +160,13 @@ export function OperationEditForm({ operation, onSave }: Props) {
               <div className="grid-2">
                 <label className="field">
                   Tarjeta cubana
-                  <input value={cubaCardNumber} onChange={(e) => setCubaCardNumber(e.target.value)} required />
+                  <input
+                    value={cubaCardNumber}
+                    inputMode="numeric"
+                    placeholder="XXXX-XXXX-XXXX-XXXX"
+                    onChange={(e) => setCubaCardNumber(formatCardNumber(e.target.value))}
+                    required
+                  />
                 </label>
                 <label className="field">
                   Nombre del titular
@@ -153,36 +185,29 @@ export function OperationEditForm({ operation, onSave }: Props) {
               <input value={cubaPhone} onChange={(e) => setCubaPhone(e.target.value)} required />
             </label>
           ) : null}
-          {isCashKind(operation.kind) ? (
-            <>
-              <div className="grid-2">
-                <label className="field">
-                  Provincia
-                  <select value={provinceId} onChange={(e) => setProvinceId(e.target.value)} required>
-                    <option value="">Selecciona provincia</option>
-                    {provinces.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  Quien recibe en Cuba
-                  <input value={cubaRecipientName} onChange={(e) => setCubaRecipientName(e.target.value)} />
-                </label>
-              </div>
-              <div className="grid-2">
-                <label className="field">
-                  Teléfono Cuba
-                  <input value={cubaPhone} onChange={(e) => setCubaPhone(e.target.value)} />
-                </label>
-                <label className="field">
-                  Dirección en Cuba
-                  <input value={cubaAddress} onChange={(e) => setCubaAddress(e.target.value)} />
-                </label>
-              </div>
-            </>
+          {operation.kind === "cash_cup" || operation.kind === "cash_usd" ? (
+            <CashDeliveryFields
+              kind={operation.kind}
+              provinceId={provinceId}
+              courierId={courierId}
+              name={cubaRecipientName}
+              phone={cubaPhone}
+              address={cubaAddress}
+              mapLat={cubaMapLat}
+              mapLng={cubaMapLng}
+              payoutCurrency={payoutCurrency}
+              stockedEmpty={false}
+              onProvince={setProvinceId}
+              onCourier={setCourierId}
+              onName={setCubaRecipientName}
+              onPhone={setCubaPhone}
+              onAddress={setCubaAddress}
+              onMap={(next) => {
+                setCubaMapLat(next.lat);
+                setCubaMapLng(next.lng);
+                if (next.address) setCubaAddress(next.address);
+              }}
+            />
           ) : null}
           <div className="grid-2">
             <label className="field">

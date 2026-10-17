@@ -29,6 +29,6 @@ export function whatsappUrl(text: string, phone = ""): string {
 
 function formatCard(card: string): string {
   const digits = card.replace(/\D/g, "");
-  if (digits.length === 16) return digits.replace(/(\d{4})(?=\d)/g, "$1 ");
+  if (digits.length === 16) return digits.replace(/(\d{4})(?=\d)/g, "$1-");
   return card.trim();
 }

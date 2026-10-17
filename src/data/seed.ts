@@ -144,5 +144,6 @@ export function seedSnapshot(): Snapshot {
     provinces: seedProvinces(),
     provinceMovements: [],
     beneficiaries: [],
+    couriers: [],
   };
 }

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useStore } from "../data/StoreContext";
 import { formatHavanaDateTime, havanaDateISO } from "../lib/havana";
@@ -27,10 +27,33 @@ export function OperationDetailPage() {
   const store = useStore();
   const op = store.snapshot.operations.find((o) => o.id === id);
   const [error, setError] = useState<string | null>(null);
-  const [cardId, setCardId] = useState(store.snapshot.cards[0]?.id ?? "");
+  const [cardId, setCardId] = useState("");
   const [amount, setAmount] = useState("");
   const [references, setReferences] = useState<Record<string, string>>({});
   const [deliveryRef, setDeliveryRef] = useState("");
+
+  const legs = op ? store.snapshot.legs.filter((l) => l.operationId === op.id) : [];
+  const assigned = legs
+    .filter((l) => l.status !== "failed")
+    .reduce((s, l) => s + l.amountCup, 0);
+  const remaining = op ? Math.max(0, op.amountCup - assigned) : 0;
+  const today = havanaDateISO();
+  const cards = store.snapshot.cards.filter((c) => c.active);
+  const selectedCardId = cards.some((c) => c.id === cardId) ? cardId : (cards[0]?.id ?? "");
+  const selectedRoom = selectedCardId ? store.cardHeadroom(selectedCardId, today) : null;
+  const cardCoversRemaining =
+    selectedRoom != null && remaining > 0 && selectedRoom.maxThisMove + 0.001 >= remaining;
+  const originAmountLocked = remaining > 0 && cardCoversRemaining;
+
+  useEffect(() => {
+    if (!op || op.kind !== "transfer") return;
+    if (selectedCardId && selectedCardId !== cardId) {
+      setCardId(selectedCardId);
+      return;
+    }
+    if (!selectedRoom || remaining <= 0) return;
+    setAmount(String(cardCoversRemaining ? remaining : selectedRoom.maxThisMove));
+  }, [op?.id, op?.kind, remaining, selectedCardId, cardId, cardCoversRemaining, selectedRoom?.maxThisMove]);
 
   if (!op) {
     return (
@@ -42,13 +65,6 @@ export function OperationDetailPage() {
   }
 
   const operationId = op.id;
-  const legs = store.snapshot.legs.filter((l) => l.operationId === operationId);
-  const assigned = legs
-    .filter((l) => l.status !== "failed")
-    .reduce((s, l) => s + l.amountCup, 0);
-  const remaining = Math.max(0, op.amountCup - assigned);
-  const today = havanaDateISO();
-  const cards = store.snapshot.cards.filter((c) => c.active);
   const isAdmin = store.session?.role === "admin";
   const locked = isTerminalStatus(op.status);
   const canAssign =
@@ -93,9 +109,10 @@ export function OperationDetailPage() {
 
   function addOrigin(e: FormEvent) {
     e.preventDefault();
+    if (!selectedCardId) return;
+    const originCup = originAmountLocked ? remaining : parseAmount(amount);
     run(() => {
-      store.addLeg(operationId, cardId, parseAmount(amount));
-      setAmount("");
+      store.addLeg(operationId, selectedCardId, originCup);
     });
   }
 
@@ -295,11 +312,13 @@ export function OperationDetailPage() {
                     ? "El administrador elige las tarjetas cuando procesa la operación."
                     : "En este modo primero confirma la recogida. Después eliges las tarjetas a mano."}
             </p>
+          ) : remaining <= 0 ? (
+            <p className="muted">El CUP de la operación ya está cubierto con los orígenes.</p>
           ) : (
             <form className="row" onSubmit={addOrigin}>
               <label className="field" style={{ minWidth: 220 }}>
                 Tarjeta
-                <select value={cardId} onChange={(e) => setCardId(e.target.value)}>
+                <select value={selectedCardId} onChange={(e) => setCardId(e.target.value)}>
                   {cards.map((c) => {
                     const room = store.cardHeadroom(c.id, today);
                     return (
@@ -312,11 +331,22 @@ export function OperationDetailPage() {
               </label>
               <label className="field">
                 CUP de este origen
-                <input value={amount} onChange={(e) => setAmount(e.target.value)} />
+                <input
+                  value={originAmountLocked ? String(remaining) : amount}
+                  readOnly={originAmountLocked}
+                  onChange={(e) => {
+                    if (!originAmountLocked) setAmount(e.target.value);
+                  }}
+                />
               </label>
               <button className="btn primary" type="submit">
                 Añadir origen
               </button>
+              <p className="muted" style={{ flex: "1 1 100%", margin: 0 }}>
+                {originAmountLocked
+                  ? `CUP tomado de la operación: ${formatMoney(remaining, "CUP")}.`
+                  : `Esta tarjeta no cubre ${formatMoney(remaining, "CUP")} (máx ${formatMoney(selectedRoom?.maxThisMove ?? 0, "CUP")}). Ajusta el monto y completa con otra tarjeta.`}
+              </p>
             </form>
           )}
           <table className="table" style={{ marginTop: 16 }}>

@@ -1,5 +1,6 @@
 import type {
   Beneficiary,
+  CashCourier,
   CardAccount,
   CardMovement,
   CollectStatus,
@@ -84,6 +85,7 @@ function migrateSnapshot(snapshot: Snapshot): Snapshot {
     operations,
     provinces,
     provinceMovements: snapshot.provinceMovements ?? [],
+    couriers: snapshot.couriers ?? [],
     beneficiaries: Array.isArray(snapshot.beneficiaries)
       ? snapshot.beneficiaries.map((b) => ({
           ...b,
@@ -428,6 +430,31 @@ function apiFrom(snapshot: Snapshot): StoreApi {
         ),
       });
     },
+    upsertCourier(input: Omit<CashCourier, "id"> & { id?: string }) {
+      requireSession();
+      const name = input.name.trim();
+      if (!name) throw new Error("El nombre del repartidor es obligatorio.");
+      if (!input.provinceId) throw new Error("El repartidor necesita una provincia.");
+      const courier: CashCourier = {
+        id: input.id ?? createId("crr"),
+        provinceId: input.provinceId,
+        name,
+        phone: input.phone.trim(),
+        active: input.active,
+      };
+      persist({
+        ...snapshot,
+        couriers: [...(snapshot.couriers ?? []).filter((c) => c.id !== courier.id), courier],
+      });
+      return courier.id;
+    },
+    deleteCourier(id: string) {
+      requireAdmin();
+      persist({
+        ...snapshot,
+        couriers: (snapshot.couriers ?? []).filter((c) => c.id !== id),
+      });
+    },
     provinceHeadroom(provinceId: string) {
       return provinceRoom(snapshot, provinceId);
     },
@@ -470,6 +497,9 @@ function apiFrom(snapshot: Snapshot): StoreApi {
       }
       if (isCashKind(input.kind) && !input.provinceId) {
         throw new Error("La entrega de efectivo necesita una provincia con disponibilidad.");
+      }
+      if (isCashKind(input.kind) && !input.cubaRecipientName.trim()) {
+        throw new Error("Selecciona quién va a entregar el efectivo.");
       }
       if (input.amountGyn <= 0) {
         throw new Error("El monto GYN debe ser mayor que cero.");
@@ -667,6 +697,9 @@ function apiFrom(snapshot: Snapshot): StoreApi {
       }
       if (isCashKind(current.kind) && !provinceId) {
         throw new Error("La entrega de efectivo necesita una provincia.");
+      }
+      if (isCashKind(current.kind) && !cubaRecipientName) {
+        throw new Error("Selecciona quién va a entregar el efectivo.");
       }
       const assigned = assignedCup(snapshot.legs, operationId);
       if (current.kind === "transfer" && amountCup + 0.001 < assigned) {

@@ -135,6 +135,14 @@ export type Province = {
   notes: string;
 };
 
+export type CashCourier = {
+  id: string;
+  provinceId: string;
+  name: string;
+  phone: string;
+  active: boolean;
+};
+
 export type ProvinceMovement = {
   id: string;
   provinceId: string;
@@ -182,4 +190,5 @@ export type Snapshot = {
   provinces: Province[];
   provinceMovements: ProvinceMovement[];
   beneficiaries: Beneficiary[];
+  couriers: CashCourier[];
 };

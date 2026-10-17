@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatCardNumber } from "../lib/cards";
 import {
   canSendTransferWhatsApp,
   transferWhatsAppText,
@@ -24,13 +25,13 @@ export function TransferWhatsAppPanel({
   cubaPhone,
   onSave,
 }: Props) {
-  const [card, setCard] = useState(cubaCardNumber);
+  const [card, setCard] = useState(formatCardNumber(cubaCardNumber));
   const [name, setName] = useState(cubaRecipientName);
   const [mobile, setMobile] = useState(cubaPhone);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    setCard(cubaCardNumber);
+    setCard(formatCardNumber(cubaCardNumber));
     setName(cubaRecipientName);
     setMobile(cubaPhone);
   }, [cubaCardNumber, cubaRecipientName, cubaPhone]);
@@ -68,7 +69,12 @@ export function TransferWhatsAppPanel({
       <div className="grid-2">
         <label className="field">
           Tarjeta
-          <input value={card} onChange={(e) => setCard(e.target.value)} placeholder="XXXX XXXX XXXX XXXX" />
+          <input
+            value={card}
+            inputMode="numeric"
+            placeholder="XXXX-XXXX-XXXX-XXXX"
+            onChange={(e) => setCard(formatCardNumber(e.target.value))}
+          />
         </label>
         <label className="field">
           Nombre

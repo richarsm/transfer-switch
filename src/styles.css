@@ -196,6 +196,185 @@ h1, h2, h3 {
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
 
+.kind-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.kind-card {
+  appearance: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 198px;
+  padding: 16px 18px 14px;
+  border: 3px solid transparent;
+  border-radius: 16px;
+  color: #fff;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(19, 33, 28, 0.14);
+}
+.kind-card h3 {
+  font-size: 20px;
+  line-height: 1.15;
+  color: inherit;
+}
+.kind-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  opacity: 0.94;
+  max-width: 22ch;
+}
+.kind-icon {
+  width: 42px;
+  height: 42px;
+  display: block;
+}
+.kind-rate {
+  margin-top: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.kind-note {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.88;
+}
+.kind-chevron {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  font-size: 22px;
+  line-height: 1;
+  opacity: 0.85;
+}
+.kind-card.transfer { background: linear-gradient(180deg, #ef3b37 0%, #d32f2f 100%); }
+.kind-card.recharge { background: linear-gradient(180deg, #2f8a7b 0%, #1f655b 100%); }
+.kind-card.cash-cup { background: linear-gradient(180deg, #1e88e5 0%, #1565c0 100%); }
+.kind-card.cash-usd {
+  background: linear-gradient(180deg, #ffd54f 0%, #f9a825 100%);
+  color: #16120a;
+}
+.kind-card.selected {
+  border-color: #fff;
+  box-shadow: 0 0 0 3px var(--panel), 0 10px 22px rgba(19, 33, 28, 0.2);
+}
+.kind-card:hover:not(:disabled) { filter: brightness(1.04); }
+.kind-card:disabled {
+  opacity: 0.4;
+  filter: grayscale(0.45);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.stepper-card {
+  display: grid;
+  gap: 14px;
+}
+.stepper {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.stepper button {
+  appearance: none;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  row-gap: 1px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+.stepper button em {
+  grid-row: 1 / span 2;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--line);
+  color: var(--ink-soft);
+  align-self: center;
+}
+.stepper button strong {
+  font-size: 13px;
+  line-height: 1.2;
+}
+.stepper button span {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+.stepper button.active {
+  border-color: var(--gold);
+  background: var(--gold-2);
+  color: var(--panel);
+}
+.stepper button.active strong,
+.stepper button.active span {
+  color: var(--panel);
+}
+.stepper button.active em {
+  background: var(--panel);
+  color: var(--gold-2);
+}
+.stepper button.done em {
+  background: var(--panel);
+  color: var(--gold-2);
+}
+.step-body {
+  display: grid;
+  gap: 12px;
+}
+.step-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 4px;
+}
+.step-recap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.step-recap span {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.map-picker {
+  display: grid;
+  gap: 10px;
+}
+.map-host {
+  height: 260px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  z-index: 1;
+}
+.map-host .leaflet-container {
+  height: 100%;
+  font-family: inherit;
+}
+
 label.field {
   display: flex;
   flex-direction: column;
@@ -208,6 +387,10 @@ label.field input, label.field select, label.field textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 9px 11px;
+}
+label.field input:read-only {
+  background: var(--paper-2);
+  cursor: default;
 }
 label.field textarea { min-height: 80px; resize: vertical; }
 
@@ -297,6 +480,7 @@ label.field textarea { min-height: 80px; resize: vertical; }
   vertical-align: top;
 }
 .table tr:hover td { background: #faf6ee; }
+.table tr.row-link { cursor: pointer; }
 
 .badge {
   display: inline-block;
@@ -458,10 +642,20 @@ label.field textarea { min-height: 80px; resize: vertical; }
     cursor: pointer;
   }
   .stats, .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .kind-grid { grid-template-columns: 1fr 1fr; }
+  .stepper { grid-template-columns: 1fr 1fr; }
   .side-foot { margin-top: auto; }
   .main { padding: 16px 16px 40px; }
   .topbar { align-items: start; flex-direction: column; }
   .topbar .rate-ref { display: none; }
   .page-head { align-items: start; flex-direction: column; }
   .table { font-size: 13px; }
+}
+
+@media (max-width: 1200px) and (min-width: 961px) {
+  .kind-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 640px) {
+  .kind-grid { grid-template-columns: 1fr; }
+  .stepper button span { display: none; }
 }

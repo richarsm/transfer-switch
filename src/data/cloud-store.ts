@@ -2,6 +2,7 @@ import type {
   Beneficiary,
   CardAccount,
   CardMovement,
+  CashCourier,
   ItineraryLeg,
   Opening,
   Operation,
@@ -32,6 +33,7 @@ function empty(): Omit<Snapshot, "sessionUserId"> {
     provinces: [],
     provinceMovements: [],
     beneficiaries: [],
+    couriers: [],
   };
 }
 
@@ -49,6 +51,7 @@ export async function pullSnapshot(): Promise<Omit<Snapshot, "sessionUserId">> {
     provinces,
     provinceMovements,
     beneficiaries,
+    couriers,
   ] = await Promise.all([
     sb.from("profiles").select("*"),
     sb.from("openings").select("*"),
@@ -61,6 +64,7 @@ export async function pullSnapshot(): Promise<Omit<Snapshot, "sessionUserId">> {
     sb.from("provinces").select("*"),
     sb.from("province_movements").select("*"),
     sb.from("beneficiaries").select("*"),
+    sb.from("cash_couriers").select("*"),
   ]);
 
   const firstError = [
@@ -77,6 +81,9 @@ export async function pullSnapshot(): Promise<Omit<Snapshot, "sessionUserId">> {
     beneficiaries,
   ].find((r) => r.error);
   if (firstError?.error) throw new Error(firstError.error.message);
+  if (couriers.error && !missingTable(couriers.error)) {
+    throw new Error(couriers.error.message);
+  }
 
   return {
     profiles: (profiles.data ?? []).map(mapProfile),
@@ -90,6 +97,7 @@ export async function pullSnapshot(): Promise<Omit<Snapshot, "sessionUserId">> {
     provinces: (provinces.data ?? []).map(mapProvince),
     provinceMovements: (provinceMovements.data ?? []).map(mapProvinceMovement),
     beneficiaries: (beneficiaries.data ?? []).map(mapBeneficiary),
+    couriers: (couriers.data ?? []).map(mapCourier),
   };
 }
 
@@ -99,6 +107,7 @@ export async function pushSnapshot(snapshot: Snapshot) {
   await deleteGone("transfer_legs", snapshot.legs);
   await deleteGone("itinerary_legs", snapshot.itineraries);
   await deleteGone("beneficiaries", snapshot.beneficiaries);
+  await deleteGoneOptional("cash_couriers", snapshot.couriers ?? []);
   await deleteGone("operations", snapshot.operations);
   await deleteGone("travel_offers", snapshot.travels);
 
@@ -228,6 +237,16 @@ export async function pushSnapshot(snapshot: Snapshot) {
       kind: m.kind,
     })),
   );
+  await upsertOptional(
+    "cash_couriers",
+    (snapshot.couriers ?? []).map((c) => ({
+      id: c.id,
+      province_id: c.provinceId,
+      name: c.name,
+      phone: c.phone,
+      active: c.active,
+    })),
+  );
   await upsertRows(
     "beneficiaries",
     snapshot.beneficiaries.map((b) => ({
@@ -291,10 +310,37 @@ async function deleteGone(table: string, rows: Array<{ id: string }>) {
   if (error) throw new Error(`${table} delete: ${error.message}`);
 }
 
+async function deleteGoneOptional(table: string, rows: Array<{ id: string }>) {
+  try {
+    await deleteGone(table, rows);
+  } catch (err) {
+    if (!missingTable(err)) throw err;
+  }
+}
+
 async function upsertRows(table: string, rows: Array<Record<string, unknown>>) {
   if (!rows.length) return;
   const { error } = await getSupabase().from(table).upsert(rows);
   if (error) throw new Error(`${table} upsert: ${error.message}`);
+}
+
+async function upsertOptional(table: string, rows: Array<Record<string, unknown>>) {
+  try {
+    await upsertRows(table, rows);
+  } catch (err) {
+    if (!missingTable(err)) throw err;
+  }
+}
+
+function missingTable(err: unknown): boolean {
+  const message =
+    err && typeof err === "object" && "message" in err ? String((err as { message: string }).message) : String(err);
+  const code = err && typeof err === "object" && "code" in err ? String((err as { code: string }).code) : "";
+  return (
+    code === "PGRST205" ||
+    code === "42P01" ||
+    /could not find the table|does not exist|schema cache/i.test(message)
+  );
 }
 
 const CLOUD_TABLES = [
@@ -309,6 +355,7 @@ const CLOUD_TABLES = [
   "provinces",
   "province_movements",
   "beneficiaries",
+  "cash_couriers",
 ] as const;
 
 export function subscribeCloud(onChange: () => void) {
@@ -512,6 +559,16 @@ function mapBeneficiary(row: Record<string, unknown>): Beneficiary {
     cubaAddress: String(row.cuba_address ?? ""),
     provinceId: row.province_id ? String(row.province_id) : "",
     notes: String(row.notes ?? ""),
+  };
+}
+
+function mapCourier(row: Record<string, unknown>): CashCourier {
+  return {
+    id: String(row.id),
+    provinceId: String(row.province_id),
+    name: String(row.name ?? ""),
+    phone: String(row.phone ?? ""),
+    active: row.active !== false,
   };
 }
 

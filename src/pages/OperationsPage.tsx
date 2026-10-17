@@ -1,12 +1,11 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useStore } from "../data/StoreContext";
 import { formatHavanaDateTime, havanaDateISO } from "../lib/havana";
 import { formatMoney } from "../lib/money";
 import {
   awaitingAdminProcess,
   cancelledByLabel,
-  isCashKind,
   kindLabel,
   modeLabel,
   operationMatchesQuery,
@@ -14,7 +13,7 @@ import {
   statusLabel,
   statusTone,
 } from "../lib/operations";
-import type { Operation } from "../domain/types";
+import type { Operation, Profile } from "../domain/types";
 
 type Queue = "pending" | "done" | "cancelled";
 
@@ -28,7 +27,7 @@ export function OperationsPage() {
   const { snapshot } = useStore();
   const [queue, setQueue] = useState<Queue>("pending");
   const [query, setQuery] = useState("");
-  const people = new Map(snapshot.profiles.map((p) => [p.id, p.displayName]));
+  const people = new Map(snapshot.profiles.map((p) => [p.id, p]));
 
   const counts = useMemo(() => {
     const pending = snapshot.operations.filter(awaitingAdminProcess).length;
@@ -110,7 +109,6 @@ export function OperationsPage() {
                   <th>GYN</th>
                   <th>Entrega</th>
                   <th>Estado</th>
-                  <th className="col-operator">Asesor</th>
                   <th></th>
                 </tr>
               </thead>
@@ -138,21 +136,17 @@ function OperationRow({
   people,
 }: {
   op: Operation;
-  people: Map<string, string>;
+  people: Map<string, Profile>;
 }) {
   const { snapshot } = useStore();
+  const navigate = useNavigate();
+  const href = `/operaciones/${op.id}`;
+  const who = people.get(op.createdBy);
+  const roleLabel = who?.role === "admin" ? "Administrador" : "Asesor";
   return (
-    <tr>
+    <tr className="row-link" onClick={() => navigate(href)}>
       <td>
-        {op.contactName}
-        <div className="muted op-operator">Asesor: {people.get(op.createdBy) ?? "—"}</div>
-        <div className="muted">
-          {op.kind === "mobile_recharge" && op.cubaPhone
-            ? `Recarga ${op.cubaPhone}`
-            : isCashKind(op.kind)
-              ? op.cubaAddress || op.address
-              : op.cubaRecipientName || op.address}
-        </div>
+        {roleLabel}: {who?.displayName ?? "—"}
       </td>
       <td>{kindLabel(op.kind)}</td>
       <td>{modeLabel(op.mode, op.kind)}</td>
@@ -172,9 +166,10 @@ function OperationRow({
               : "Por recoger"}
         </div>
       </td>
-      <td className="col-operator">{people.get(op.createdBy) ?? "—"}</td>
       <td>
-        <Link to={`/operaciones/${op.id}`}>Ficha</Link>
+        <Link to={href} onClick={(e) => e.stopPropagation()}>
+          Ficha
+        </Link>
       </td>
     </tr>
   );

@@ -1,10 +1,11 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useStore } from "../data/StoreContext";
 import { havanaDateISO, havanaMonthPrefix } from "../lib/havana";
 import { formatMoney } from "../lib/money";
 
 export function DashboardPage() {
   const store = useStore();
+  const navigate = useNavigate();
   const today = havanaDateISO();
   const monthStart = `${havanaMonthPrefix()}-01`;
   const day = store.dashboard(today, today);
@@ -76,7 +77,11 @@ export function DashboardPage() {
             </thead>
             <tbody>
               {pendingOps.map((op) => (
-                <tr key={op.id}>
+                <tr
+                  key={op.id}
+                  className="row-link"
+                  onClick={() => navigate(`/operaciones/${op.id}`)}
+                >
                   <td>
                     {op.contactName}
                     <div className="muted">{op.contactPhone}</div>
@@ -89,7 +94,9 @@ export function DashboardPage() {
                     {store.snapshot.profiles.find((p) => p.id === op.createdBy)?.displayName ?? "—"}
                   </td>
                   <td>
-                    <Link to={`/operaciones/${op.id}`}>Abrir</Link>
+                    <Link to={`/operaciones/${op.id}`} onClick={(e) => e.stopPropagation()}>
+                      Abrir
+                    </Link>
                   </td>
                 </tr>
               ))}

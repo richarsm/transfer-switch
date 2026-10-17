@@ -18,7 +18,15 @@ const client = new pg.Client({
 });
 
 const dir = path.resolve("supabase/migrations");
-const files = fs.readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
+const only = process.argv[2];
+const files = fs
+  .readdirSync(dir)
+  .filter((f) => f.endsWith(".sql") && (!only || f === only || f.startsWith(only)))
+  .sort();
+if (files.length === 0) {
+  console.error(only ? `No hay migración que coincida con ${only}` : "No hay migraciones");
+  process.exit(1);
+}
 
 await client.connect();
 try {

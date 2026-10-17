@@ -6,6 +6,7 @@ export function ProvincesPage() {
   const store = useStore();
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const isAdmin = store.session?.role === "admin";
 
   function onSubmit(e: FormEvent<HTMLFormElement>, id: string) {
     e.preventDefault();
@@ -97,6 +98,129 @@ export function ProvincesPage() {
           </tbody>
         </table>
       </section>
+      <CourierSection isAdmin={isAdmin} onError={setError} />
     </>
+  );
+}
+
+function CourierSection({
+  isAdmin,
+  onError,
+}: {
+  isAdmin: boolean;
+  onError: (message: string | null) => void;
+}) {
+  const store = useStore();
+  const couriers = store.snapshot.couriers ?? [];
+
+  function addCourier(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const formEl = e.currentTarget;
+    const form = new FormData(formEl);
+    try {
+      store.upsertCourier({
+        provinceId: String(form.get("provinceId") ?? ""),
+        name: String(form.get("name") ?? ""),
+        phone: String(form.get("phone") ?? ""),
+        active: true,
+      });
+      formEl.reset();
+      onError(null);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "No se pudo guardar el repartidor.");
+    }
+  }
+
+  return (
+    <section className="card">
+      <h2>Repartidores de efectivo</h2>
+      <p className="muted">
+        Personas que entregan CUP o USD según la provincia. En la operación se
+        elige al repartidor de esa provincia.
+      </p>
+      {store.session ? (
+        <form className="row" onSubmit={addCourier} style={{ marginBottom: 16 }}>
+          <label className="field" style={{ minWidth: 180 }}>
+            Provincia
+            <select name="provinceId" required>
+              <option value="">Selecciona</option>
+              {store.snapshot.provinces.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Nombre
+            <input name="name" required placeholder="Quien entrega" />
+          </label>
+          <label className="field">
+            Teléfono
+            <input name="phone" placeholder="+53 ..." />
+          </label>
+          <button className="btn primary" type="submit">
+            Añadir
+          </button>
+        </form>
+      ) : null}
+      {couriers.length === 0 ? (
+        <p className="muted">Aún no hay repartidores registrados.</p>
+      ) : (
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Provincia</th>
+              <th>Nombre</th>
+              <th>Teléfono</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {couriers
+              .slice()
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((c) => {
+                const province = store.snapshot.provinces.find((p) => p.id === c.provinceId);
+                return (
+                  <tr key={c.id}>
+                    <td>{province?.name ?? "—"}</td>
+                    <td>
+                      {c.name}
+                      {!c.active ? <div className="muted">Inactivo</div> : null}
+                    </td>
+                    <td>{c.phone || "—"}</td>
+                    <td>
+                      {isAdmin ? (
+                        <div className="row">
+                          <button
+                            type="button"
+                            className="btn ghost"
+                            onClick={() =>
+                              store.upsertCourier({
+                                ...c,
+                                active: !c.active,
+                              })
+                            }
+                          >
+                            {c.active ? "Desactivar" : "Activar"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn danger"
+                            onClick={() => store.deleteCourier(c.id)}
+                          >
+                            Quitar
+                          </button>
+                        </div>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
+          </tbody>
+        </table>
+      )}
+    </section>
   );
 }

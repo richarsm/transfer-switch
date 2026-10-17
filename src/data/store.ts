@@ -12,6 +12,7 @@ import type {
   Role,
   Snapshot,
   TravelOffer,
+  CashCourier,
 } from "../domain/types";
 
 export type CardHeadroom = {
@@ -90,6 +91,8 @@ export type StoreApi = {
     cashUsd: number;
     notes: string;
   }) => void;
+  upsertCourier: (input: Omit<CashCourier, "id"> & { id?: string }) => string;
+  deleteCourier: (id: string) => void;
   provinceHeadroom: (provinceId: string) => ProvinceHeadroom;
   createOperation: (input: {
     kind: OperationKind;
