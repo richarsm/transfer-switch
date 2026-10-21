@@ -1,10 +1,17 @@
 import type {
+  AccessDesk,
+  AccessRequest,
   Beneficiary,
   CashCourier,
   CardAccount,
   CardMovement,
   CollectStatus,
+  CubaMessage,
+  CubaOperator,
+  CubaOperatorKind,
+  CubaThread,
   ItineraryLeg,
+  MessageChannel,
   Opening,
   Operation,
   OperationKind,
@@ -18,13 +25,23 @@ import type {
   TravelOffer,
 } from "../domain/types";
 import { createId } from "../lib/ids";
+import { makeTrackingCode } from "../lib/tracking";
+import {
+  CUBA_TIMEOUT_MS,
+  expectedAmount,
+  matchInboundThread,
+  parseCubaReply,
+  pickCubaOperator,
+  profileOwnsCubaOperator,
+  timedOut,
+} from "../lib/cuba-inbox";
 import { havanaDateISO, inRange, rangesOverlap } from "../lib/havana";
 import { round2 } from "../lib/money";
 import { beneficiariesFromOperations, upsertBeneficiaryList } from "../lib/beneficiaries";
 import { assignedCup, cancelBlockReason, confirmBlockReason, isCashKind, isDeliveryKind, workflowStatus } from "../lib/operations";
 import { seedProvinces, seedSnapshot } from "./seed";
-import { emptyCloudSnapshot, pullSnapshot, pushSnapshot, subscribeCloud } from "./cloud-store";
-import { isCloudConfigured } from "./supabase";
+import { emptyCloudSnapshot, insertAccessRequest, pullSnapshot, pushSnapshot, subscribeCloud } from "./cloud-store";
+import { appRedirectUrl, getSupabase, isCloudConfigured } from "./supabase";
 import type { CardHeadroom, DashboardTotals, OperationPatch, ProvinceHeadroom, StoreApi } from "./store";
 
 const KEY = "transfer-switch.v1";
@@ -53,6 +70,12 @@ function migrateSnapshot(snapshot: Snapshot): Snapshot {
       ? seeded.map((seed) => existing.find((p) => p.code === seed.code) ?? seed)
       : seeded;
   const legs = snapshot.legs ?? [];
+  const cubaThreads = snapshot.cubaThreads ?? [];
+  const cubaDone = new Map(
+    cubaThreads
+      .filter((t) => t.status === "auto_matched")
+      .map((t) => [t.operationId, t] as const),
+  );
   const operations = snapshot.operations.map((op) => {
     const next = {
       ...op,
@@ -72,9 +95,29 @@ function migrateSnapshot(snapshot: Snapshot): Snapshot {
       confirmedAt: op.confirmedAt ?? null,
       cancelledAt: op.cancelledAt ?? null,
       cancelledBy: op.cancelledBy ?? null,
+      trackingCode: op.trackingCode ?? "",
+      cubaOperatorId: op.cubaOperatorId ?? "",
     };
+    const thread = cubaDone.get(next.id);
+    if (
+      thread &&
+      isDeliveryKind(next.kind) &&
+      next.deliveryStatus !== "sent" &&
+      next.deliveryStatus !== "failed"
+    ) {
+      next.deliveryStatus = "sent";
+      next.deliveryReference = next.deliveryReference || thread.parsedReference;
+      next.deliveredAt = next.deliveredAt || thread.repliedAt;
+    }
     return { ...next, status: workflowStatus(next, legs) };
   });
+  const taken = new Set(operations.map((op) => op.trackingCode).filter(Boolean));
+  for (const op of operations) {
+    if (!op.trackingCode) {
+      op.trackingCode = makeTrackingCode(taken);
+      taken.add(op.trackingCode);
+    }
+  }
   return {
     ...snapshot,
     openings: snapshot.openings.map((o) => ({
@@ -86,6 +129,17 @@ function migrateSnapshot(snapshot: Snapshot): Snapshot {
     provinces,
     provinceMovements: snapshot.provinceMovements ?? [],
     couriers: snapshot.couriers ?? [],
+    cubaOperators: (snapshot.cubaOperators ?? []).map((o) => ({
+      ...o,
+      profileId: o.profileId ?? "",
+    })),
+    cubaThreads,
+    cubaMessages: snapshot.cubaMessages ?? [],
+    accessRequests: snapshot.accessRequests ?? [],
+    settings: {
+      advisorCommissionPercent:
+        snapshot.settings?.advisorCommissionPercent ?? 6,
+    },
     beneficiaries: Array.isArray(snapshot.beneficiaries)
       ? snapshot.beneficiaries.map((b) => ({
           ...b,
@@ -136,6 +190,10 @@ const listeners = new Set<() => void>();
 let saveChain = Promise.resolve();
 let cloudUnsub: (() => void) | null = null;
 let booting: Promise<void> | null = null;
+let authNotice: string | null = null;
+let pendingAuth: { email: string; googleName: string } | null = null;
+let authListening = false;
+const queuingAccess = new Set<string>();
 
 function notify() {
   listeners.forEach((fn) => fn());
@@ -145,16 +203,157 @@ function persist(next: Snapshot) {
   writeSession(next.sessionUserId);
   state = next;
   notify();
-  if (!isCloudConfigured()) {
+  try {
     localStorage.setItem(KEY, JSON.stringify(next));
-    return;
+  } catch {
+    /* private mode */
   }
+  if (!isCloudConfigured()) return;
   const snapshot = next;
   saveChain = saveChain
     .then(() => pushSnapshot(snapshot))
     .catch((err) => {
       console.error(err);
     });
+}
+
+function applyCloudPull(pull: Awaited<ReturnType<typeof pullSnapshot>>, overlay: Snapshot): Snapshot {
+  const { missingCubaInbox, missingCouriers, missingAccessRequests, missingSettings, ...data } = pull;
+  const prevOps = overlay.operations ?? [];
+  return migrateSnapshot({
+    ...data,
+    sessionUserId: overlay.sessionUserId ?? readSession(),
+    operations: data.operations.map((op) => {
+      const prev = prevOps.find((o) => o.id === op.id);
+      return {
+        ...op,
+        trackingCode: op.trackingCode || prev?.trackingCode || "",
+        cubaOperatorId: op.cubaOperatorId || prev?.cubaOperatorId || "",
+      };
+    }),
+    couriers: missingCouriers ? overlay.couriers ?? [] : data.couriers,
+    cubaOperators: missingCubaInbox ? overlay.cubaOperators ?? [] : data.cubaOperators,
+    cubaThreads: missingCubaInbox ? overlay.cubaThreads ?? [] : data.cubaThreads,
+    cubaMessages: missingCubaInbox ? overlay.cubaMessages ?? [] : data.cubaMessages,
+    accessRequests: missingAccessRequests ? overlay.accessRequests ?? [] : data.accessRequests,
+    settings: missingSettings
+      ? overlay.settings ?? { advisorCommissionPercent: 6 }
+      : data.settings,
+  });
+}
+
+function profileForEmail(email: string | undefined | null) {
+  if (!email) return null;
+  const needle = email.trim().toLowerCase();
+  return state.profiles.find((p) => p.email.trim().toLowerCase() === needle) ?? null;
+}
+
+function googleDisplayName(user: { email?: string | null; user_metadata?: Record<string, unknown> }) {
+  const meta = user.user_metadata ?? {};
+  const name = String(meta.full_name ?? meta.name ?? meta.display_name ?? "").trim();
+  if (name) return name;
+  return user.email?.split("@")[0] ?? "";
+}
+
+function setSessionUser(userId: string | null) {
+  writeSession(userId);
+  if (state.sessionUserId === userId) return;
+  state = { ...state, sessionUserId: userId };
+  notify();
+}
+
+async function applyAuthSession(
+  session: { user?: { email?: string | null; user_metadata?: Record<string, unknown> } } | null,
+) {
+  if (!session?.user) {
+    pendingAuth = null;
+    setSessionUser(null);
+    return;
+  }
+  const email = session.user.email?.trim().toLowerCase() ?? "";
+  const profile = profileForEmail(email);
+  if (profile?.active) {
+    pendingAuth = null;
+    authNotice = null;
+    setSessionUser(profile.id);
+    return;
+  }
+  if (profile && !profile.active) {
+    pendingAuth = null;
+    authNotice = email
+      ? `El usuario ${email} está desactivado.`
+      : "Ese usuario está desactivado.";
+    setSessionUser(null);
+    state = { ...state };
+    notify();
+    try {
+      await getSupabase().auth.signOut();
+    } catch {
+      /* already signed out */
+    }
+    return;
+  }
+  pendingAuth = {
+    email,
+    googleName: googleDisplayName(session.user),
+  };
+  authNotice = null;
+  setSessionUser(null);
+  state = { ...state };
+  notify();
+  void queueAccessRequest(email, pendingAuth.googleName);
+}
+
+async function queueAccessRequest(email: string, displayName: string) {
+  const needle = email.trim().toLowerCase();
+  if (!needle.includes("@")) return;
+  if ((state.accessRequests ?? []).some((r) => r.status === "pending" && r.email === needle)) return;
+  if (queuingAccess.has(needle)) return;
+  queuingAccess.add(needle);
+  const request: AccessRequest = {
+    id: createId(),
+    email: needle,
+    displayName: displayName.trim() || needle.split("@")[0],
+    phone: "",
+    note: "",
+    desk: "",
+    status: "pending",
+    decidedRole: null,
+    decidedBy: null,
+    decidedAt: null,
+    createdAt: new Date().toISOString(),
+  };
+  try {
+    if (isCloudConfigured()) {
+      try {
+        await insertAccessRequest(request);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (/pendiente con ese correo|duplicate|unique/i.test(message)) return;
+        throw err;
+      }
+    }
+    if ((state.accessRequests ?? []).some((r) => r.status === "pending" && r.email === needle)) return;
+    const next: Snapshot = {
+      ...state,
+      accessRequests: [...(state.accessRequests ?? []), request],
+    };
+    if (isCloudConfigured()) {
+      state = next;
+      try {
+        localStorage.setItem(KEY, JSON.stringify(next));
+      } catch {
+        /* private mode */
+      }
+      notify();
+      return;
+    }
+    persist(next);
+  } catch (err) {
+    console.error(err);
+  } finally {
+    queuingAccess.delete(needle);
+  }
 }
 
 export async function bootStore() {
@@ -165,15 +364,24 @@ export async function bootStore() {
       notify();
       return;
     }
-    const data = await pullSnapshot();
-    state = { ...data, sessionUserId: readSession() };
-    notify();
+    const sb = getSupabase();
+    const [data, auth] = await Promise.all([pullSnapshot(), sb.auth.getSession()]);
+    state = applyCloudPull(data, { ...load(), sessionUserId: null });
+    await applyAuthSession(auth.data.session);
+    if (!authListening) {
+      authListening = true;
+      sb.auth.onAuthStateChange((_event, session) => {
+        void applyAuthSession(session);
+      });
+    }
     if (cloudUnsub) return;
     try {
       cloudUnsub = subscribeCloud(() => {
         void pullSnapshot()
-          .then((next) => {
-            state = { ...next, sessionUserId: readSession() };
+          .then(async (next) => {
+            state = applyCloudPull(next, { ...state, sessionUserId: state.sessionUserId });
+            const auth = await getSupabase().auth.getSession();
+            await applyAuthSession(auth.data.session);
             notify();
           })
           .catch((err) => console.error(err));
@@ -285,6 +493,152 @@ export const localRepo = {
   },
 };
 
+function normalizeCubaKinds(kinds: CubaOperatorKind[] | undefined): CubaOperatorKind[] {
+  const allowed: CubaOperatorKind[] = ["transfer", "mobile_recharge"];
+  return allowed.filter((k) => (kinds ?? []).includes(k));
+}
+
+function stampTracking(
+  snapshot: Snapshot,
+  operation: Operation,
+): { operations: Operation[]; operation: Operation } {
+  if (operation.trackingCode) {
+    return { operations: snapshot.operations, operation };
+  }
+  const trackingCode = makeTrackingCode(snapshot.operations.map((o) => o.trackingCode));
+  return {
+    operations: snapshot.operations.map((op) => (op.id === operation.id ? { ...op, trackingCode } : op)),
+    operation: { ...operation, trackingCode },
+  };
+}
+
+function applyCubaVerdict(
+  snapshot: Snapshot,
+  thread: CubaThread,
+  verdict: "success" | "failure" | "unclear",
+  reference: string,
+  now: string,
+  force = false,
+): Snapshot {
+  const operation = snapshot.operations.find((o) => o.id === thread.operationId);
+  if (!operation) return snapshot;
+  const cubaThreads = snapshot.cubaThreads ?? [];
+  if (verdict === "unclear") {
+    return {
+      ...snapshot,
+      cubaThreads: cubaThreads.map((t) =>
+        t.id === thread.id
+          ? { ...t, status: "needs_review", repliedAt: now, parsedReference: reference, lastError: "" }
+          : t,
+      ),
+    };
+  }
+  if (verdict === "failure") {
+    let next: Snapshot = {
+      ...snapshot,
+      cubaThreads: cubaThreads.map((t) =>
+        t.id === thread.id
+          ? { ...t, status: "failed", repliedAt: now, parsedReference: reference, lastError: "El operador reportó un fallo." }
+          : t,
+      ),
+    };
+    if (isDeliveryKind(operation.kind) && operation.deliveryStatus !== "failed") {
+      const releases: ProvinceMovement[] = [];
+      if (isCashKind(operation.kind) && operation.provinceId) {
+        const currency = operation.kind === "cash_usd" ? "USD" : "CUP";
+        releases.push({
+          id: createId("pmv"),
+          provinceId: operation.provinceId,
+          operationId: operation.id,
+          currency,
+          amount: currency === "USD" ? operation.amountUsd : operation.amountCup,
+          kind: "release",
+        });
+      }
+      next = {
+        ...next,
+        operations: next.operations.map((op) =>
+          op.id === operation.id
+            ? {
+                ...op,
+                deliveryStatus: "failed",
+                deliveredAt: null,
+                status: workflowStatus({ ...op, deliveryStatus: "failed" }, next.legs),
+              }
+            : op,
+        ),
+        provinceMovements: [...next.provinceMovements, ...releases],
+      };
+    }
+    return next;
+  }
+
+  const ref = reference.trim() || thread.code;
+  let next: Snapshot = {
+    ...snapshot,
+    cubaThreads: cubaThreads.map((t) =>
+      t.id === thread.id
+        ? { ...t, status: "auto_matched", repliedAt: now, parsedReference: ref, lastError: "" }
+        : t,
+    ),
+  };
+
+  if (isDeliveryKind(operation.kind) && operation.deliveryStatus !== "sent") {
+    next = {
+      ...next,
+      operations: next.operations.map((op) =>
+        op.id === operation.id
+          ? {
+              ...op,
+              deliveryStatus: "sent",
+              deliveryReference: ref,
+              deliveredAt: now,
+              status: workflowStatus({ ...op, deliveryStatus: "sent" }, next.legs),
+            }
+          : op,
+      ),
+    };
+  } else if (operation.kind === "transfer") {
+    const pending = next.legs.filter((l) => l.operationId === operation.id && l.status === "pending");
+    if (pending.length === 1) {
+      next = {
+        ...next,
+        legs: next.legs.map((l) =>
+          l.id === pending[0].id ? { ...l, status: "sent" as const, reference: ref, sentAt: now } : l,
+        ),
+        operations: next.operations.map((op) =>
+          op.id === operation.id
+            ? {
+                ...op,
+                status: workflowStatus(op, next.legs.map((l) =>
+                  l.id === pending[0].id ? { ...l, status: "sent" as const } : l,
+                )),
+              }
+            : op,
+        ),
+      };
+    } else if (!force) {
+      next = {
+        ...next,
+        cubaThreads: next.cubaThreads.map((t) =>
+          t.id === thread.id
+            ? {
+                ...t,
+                status: "needs_review",
+                parsedReference: ref,
+                lastError:
+                  pending.length > 1
+                    ? "Hay que revisar las patas CUP."
+                    : "No hay una pata CUP pendiente para marcar.",
+              }
+            : t,
+        ),
+      };
+    }
+  }
+  return next;
+}
+
 function apiFrom(snapshot: Snapshot): StoreApi {
   const session = snapshot.profiles.find((p) => p.id === snapshot.sessionUserId) ?? null;
   const today = havanaDateISO();
@@ -298,19 +652,48 @@ function apiFrom(snapshot: Snapshot): StoreApi {
     session,
     currentOpening,
     login(userId: string) {
+      if (isCloudConfigured()) {
+        throw new Error("Entra con Google. El listado local ya no se usa en la nube.");
+      }
       const user = snapshot.profiles.find((p) => p.id === userId);
       if (!user?.active) throw new Error("Ese usuario no está activo.");
       writeSession(userId);
       state = { ...snapshot, sessionUserId: userId };
-      if (!isCloudConfigured()) localStorage.setItem(KEY, JSON.stringify(state));
+      localStorage.setItem(KEY, JSON.stringify(state));
       notify();
     },
+    async signInWithGoogle() {
+      if (!isCloudConfigured()) throw new Error("Falta la conexión a Supabase.");
+      authNotice = null;
+      state = { ...state };
+      notify();
+      const { error } = await getSupabase().auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: appRedirectUrl(),
+          queryParams: { prompt: "select_account" },
+        },
+      });
+      if (error) {
+        throw new Error(
+          /provider is not enabled|Unsupported provider/i.test(error.message)
+            ? "Activa Google en Supabase (Authentication → Providers) y añade en Google Cloud el URI https://obyvfrrwmsqhlgmnoqfr.supabase.co/auth/v1/callback"
+            : error.message,
+        );
+      }
+    },
     logout() {
+      pendingAuth = null;
+      authNotice = null;
       writeSession(null);
       state = { ...snapshot, sessionUserId: null };
       if (!isCloudConfigured()) localStorage.setItem(KEY, JSON.stringify(state));
       notify();
+      if (isCloudConfigured()) void getSupabase().auth.signOut();
     },
+    cloudAuth: isCloudConfigured(),
+    authNotice,
+    pendingAuth,
     upsertProfile(input: {
       id?: string;
       email: string;
@@ -322,6 +705,9 @@ function apiFrom(snapshot: Snapshot): StoreApi {
       requireAdmin();
       const email = input.email.trim().toLowerCase();
       if (!email.includes("@")) throw new Error("El email no es válido.");
+      if (input.role !== "admin" && input.role !== "operator" && input.role !== "cuba") {
+        throw new Error("El rol no es válido.");
+      }
       const existing = snapshot.profiles.find(
         (p) => p.id === input.id || p.email === email,
       );
@@ -339,6 +725,115 @@ function apiFrom(snapshot: Snapshot): StoreApi {
           ...snapshot.profiles.filter((p) => p.id !== profile.id),
           profile,
         ],
+      });
+    },
+    async requestAccess(input: {
+      displayName: string;
+      phone: string;
+      note: string;
+      desk: AccessDesk | "";
+    }) {
+      const displayName = input.displayName.trim();
+      if (!displayName) throw new Error("El nombre es obligatorio.");
+      const email = (
+        isCloudConfigured()
+          ? (await getSupabase().auth.getUser()).data.user?.email
+          : pendingAuth?.email
+      )
+        ?.trim()
+        .toLowerCase();
+      if (!email || !email.includes("@")) {
+        throw new Error("Entra primero con Google para pedir acceso.");
+      }
+      if (profileForEmail(email)?.active) {
+        throw new Error("Ese correo ya tiene un perfil activo.");
+      }
+      const open = (state.accessRequests ?? []).find(
+        (r) => r.status === "pending" && r.email === email,
+      );
+      if (open) throw new Error("Ya hay una solicitud pendiente con ese correo.");
+      const request: AccessRequest = {
+        id: createId(),
+        email,
+        displayName,
+        phone: input.phone.trim(),
+        note: input.note.trim(),
+        desk: input.desk === "cuba" || input.desk === "guyana" ? input.desk : "",
+        status: "pending",
+        decidedRole: null,
+        decidedBy: null,
+        decidedAt: null,
+        createdAt: new Date().toISOString(),
+      };
+      if (isCloudConfigured()) {
+        await insertAccessRequest(request);
+        state = {
+          ...state,
+          accessRequests: [...(state.accessRequests ?? []).filter((r) => r.id !== request.id), request],
+        };
+        notify();
+        return;
+      }
+      persist({
+        ...snapshot,
+        accessRequests: [...(snapshot.accessRequests ?? []), request],
+      });
+    },
+    approveAccessRequest(id: string, role: Role) {
+      const admin = requireAdmin();
+      if (role !== "admin" && role !== "operator" && role !== "cuba") {
+        throw new Error("El rol no es válido.");
+      }
+      const request = (snapshot.accessRequests ?? []).find((r) => r.id === id);
+      if (!request || request.status !== "pending") {
+        throw new Error("Esa solicitud ya no está pendiente.");
+      }
+      const existing = snapshot.profiles.find(
+        (p) => p.email.trim().toLowerCase() === request.email,
+      );
+      const profile: Profile = {
+        id: existing?.id ?? createId("usr"),
+        email: request.email,
+        displayName: request.displayName,
+        phone: request.phone,
+        role,
+        active: true,
+      };
+      const now = new Date().toISOString();
+      persist({
+        ...snapshot,
+        profiles: [...snapshot.profiles.filter((p) => p.id !== profile.id), profile],
+        accessRequests: (snapshot.accessRequests ?? []).map((r) =>
+          r.id === id
+            ? {
+                ...r,
+                status: "approved",
+                decidedRole: role,
+                decidedBy: admin.id,
+                decidedAt: now,
+              }
+            : r,
+        ),
+      });
+    },
+    rejectAccessRequest(id: string) {
+      const admin = requireAdmin();
+      const request = (snapshot.accessRequests ?? []).find((r) => r.id === id);
+      if (!request || request.status !== "pending") {
+        throw new Error("Esa solicitud ya no está pendiente.");
+      }
+      persist({
+        ...snapshot,
+        accessRequests: (snapshot.accessRequests ?? []).map((r) =>
+          r.id === id
+            ? {
+                ...r,
+                status: "rejected",
+                decidedBy: admin.id,
+                decidedAt: new Date().toISOString(),
+              }
+            : r,
+        ),
       });
     },
     openPeriod(input: {
@@ -386,6 +881,17 @@ function apiFrom(snapshot: Snapshot): StoreApi {
         closedAt: null,
       };
       persist({ ...snapshot, openings: [...snapshot.openings, opening] });
+    },
+    upsertSettings(input: { advisorCommissionPercent: number }) {
+      requireAdmin();
+      const percent = Number(input.advisorCommissionPercent);
+      if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+        throw new Error("El porcentaje de comisión debe estar entre 0 y 100.");
+      }
+      persist({
+        ...snapshot,
+        settings: { advisorCommissionPercent: round2(percent) },
+      });
     },
     closePeriod(openingId: string) {
       requireAdmin();
@@ -454,6 +960,265 @@ function apiFrom(snapshot: Snapshot): StoreApi {
         ...snapshot,
         couriers: (snapshot.couriers ?? []).filter((c) => c.id !== id),
       });
+    },
+    upsertCubaOperator(input: Omit<CubaOperator, "id"> & { id?: string }) {
+      requireSession();
+      const name = input.name.trim();
+      if (!name) throw new Error("El nombre del operador en Cuba es obligatorio.");
+      if (!input.phone.trim() && !input.email.trim()) {
+        throw new Error("Indica WhatsApp o correo del operador.");
+      }
+      const kinds = normalizeCubaKinds(input.kinds);
+      if (!kinds.length) throw new Error("Elige si hace transferencias, recargas o ambas.");
+      const linked = input.profileId
+        ? snapshot.profiles.find((p) => p.id === input.profileId)
+        : undefined;
+      const operator: CubaOperator = {
+        id: input.id ?? createId("cop"),
+        name,
+        phone: input.phone.trim() || linked?.phone.trim() || "",
+        email: input.email.trim() || linked?.email.trim() || "",
+        profileId: input.profileId?.trim() ?? "",
+        active: input.active,
+        kinds,
+      };
+      persist({
+        ...snapshot,
+        cubaOperators: [...(snapshot.cubaOperators ?? []).filter((o) => o.id !== operator.id), operator],
+      });
+      return operator.id;
+    },
+    deleteCubaOperator(id: string) {
+      requireAdmin();
+      const busy = (snapshot.cubaThreads ?? []).some(
+        (t) =>
+          t.operatorId === id &&
+          (t.status === "queued" || t.status === "sent" || t.status === "awaiting_reply"),
+      );
+      if (busy) throw new Error("Ese operador tiene envíos pendientes. Reasigna o cierra la bandeja primero.");
+      persist({
+        ...snapshot,
+        cubaOperators: (snapshot.cubaOperators ?? []).filter((o) => o.id !== id),
+      });
+    },
+    assignCubaOperator(operationId: string, operatorId: string) {
+      requireAdmin();
+      const raw = assertActiveOperation(snapshot.operations.find((o) => o.id === operationId));
+      const { operations, operation } = stampTracking(snapshot, raw);
+      const chosen =
+        (operatorId && snapshot.cubaOperators.find((o) => o.id === operatorId && o.active)) ||
+        pickCubaOperator(snapshot.cubaOperators ?? [], snapshot.cubaThreads ?? [], operation.kind);
+      if (!chosen) throw new Error("No hay un operador de Cuba activo para este tipo de envío.");
+      const existing = (snapshot.cubaThreads ?? []).find(
+        (t) =>
+          t.operationId === operationId &&
+          (t.status === "queued" ||
+            t.status === "sent" ||
+            t.status === "awaiting_reply" ||
+            t.status === "needs_review" ||
+            t.status === "timed_out"),
+      );
+      const now = new Date().toISOString();
+      const thread: CubaThread = existing
+        ? { ...existing, operatorId: chosen.id, code: operation.trackingCode, assignedAt: now, status: "queued" }
+        : {
+            id: createId("cth"),
+            operationId,
+            operatorId: chosen.id,
+            code: operation.trackingCode,
+            status: "queued",
+            channel: "wa_me",
+            assignedAt: now,
+            sentAt: null,
+            repliedAt: null,
+            timeoutAt: null,
+            parsedReference: "",
+            lastError: "",
+          };
+      persist({
+        ...snapshot,
+        operations: operations.map((op) =>
+          op.id === operationId ? { ...op, cubaOperatorId: chosen.id } : op,
+        ),
+        cubaThreads: [
+          ...(snapshot.cubaThreads ?? []).filter((t) => t.id !== thread.id),
+          thread,
+        ],
+      });
+      return chosen.id;
+    },
+    logCubaOutbound(input: {
+      operationId: string;
+      operatorId: string;
+      channel: MessageChannel;
+      body: string;
+      cloudSent?: boolean;
+    }) {
+      requireAdmin();
+      const raw = assertActiveOperation(snapshot.operations.find((o) => o.id === input.operationId));
+      const { operations, operation } = stampTracking(snapshot, raw);
+      const operator = snapshot.cubaOperators.find((o) => o.id === input.operatorId);
+      if (!operator) throw new Error("Operador de Cuba no encontrado.");
+      const now = new Date().toISOString();
+      let threads = snapshot.cubaThreads ?? [];
+      let thread = threads.find(
+        (t) =>
+          t.operationId === input.operationId &&
+          (t.status === "queued" ||
+            t.status === "sent" ||
+            t.status === "awaiting_reply" ||
+            t.status === "needs_review" ||
+            t.status === "timed_out"),
+      );
+      if (!thread) {
+        thread = {
+          id: createId("cth"),
+          operationId: input.operationId,
+          operatorId: input.operatorId,
+          code: operation.trackingCode,
+          status: "queued",
+          channel: input.channel,
+          assignedAt: now,
+          sentAt: null,
+          repliedAt: null,
+          timeoutAt: null,
+          parsedReference: "",
+          lastError: "",
+        };
+        threads = [...threads, thread];
+      }
+      const timeoutAt = new Date(Date.now() + CUBA_TIMEOUT_MS).toISOString();
+      const nextThread: CubaThread = {
+        ...thread,
+        operatorId: input.operatorId,
+        channel: input.channel,
+        status: "awaiting_reply",
+        sentAt: now,
+        timeoutAt,
+        lastError: "",
+      };
+      const message: CubaMessage = {
+        id: createId("cmsg"),
+        threadId: nextThread.id,
+        operationId: input.operationId,
+        operatorId: input.operatorId,
+        channel: input.channel,
+        direction: "out",
+        body: input.body,
+        mediaUrl: "",
+        externalId: "",
+        createdAt: now,
+      };
+      persist({
+        ...snapshot,
+        operations: operations.map((op) =>
+          op.id === input.operationId ? { ...op, cubaOperatorId: input.operatorId } : op,
+        ),
+        cubaThreads: threads.map((t) => (t.id === nextThread.id ? nextThread : t)),
+        cubaMessages: [...(snapshot.cubaMessages ?? []), message],
+      });
+    },
+    ingestCubaReply(input: {
+      body: string;
+      fromPhone?: string;
+      fromEmail?: string;
+      channel?: MessageChannel;
+      mediaUrl?: string;
+      externalId?: string;
+      threadId?: string;
+    }) {
+      requireSession();
+      const body = input.body.trim();
+      const mediaUrl = input.mediaUrl?.trim() ?? "";
+      if (!body && !mediaUrl) throw new Error("La respuesta está vacía.");
+      const thread =
+        (input.threadId
+          ? snapshot.cubaThreads.find((t) => t.id === input.threadId)
+          : undefined) ??
+        matchInboundThread(snapshot, {
+          body,
+          fromPhone: input.fromPhone,
+          fromEmail: input.fromEmail,
+        });
+      if (!thread) throw new Error("No se pudo emparejar la respuesta con una operación.");
+      const operation = snapshot.operations.find((o) => o.id === thread.operationId);
+      if (!operation) throw new Error("Operación no encontrada.");
+      const now = new Date().toISOString();
+      const message: CubaMessage = {
+        id: createId("cmsg"),
+        threadId: thread.id,
+        operationId: thread.operationId,
+        operatorId: thread.operatorId,
+        channel: input.channel ?? "whatsapp",
+        direction: "in",
+        body,
+        mediaUrl,
+        externalId: input.externalId ?? "",
+        createdAt: now,
+      };
+      const verdict =
+        !body && mediaUrl
+          ? { verdict: "unclear" as const, reference: "" }
+          : parseCubaReply(body, expectedAmount(operation));
+      const next = applyCubaVerdict(snapshot, thread, verdict.verdict, verdict.reference || thread.code, now);
+      persist({
+        ...next,
+        cubaMessages: [...(next.cubaMessages ?? []), message],
+      });
+      return next.cubaThreads.find((t) => t.id === thread.id);
+    },
+    reviewCubaThread(threadId: string, action: "confirm" | "fail" | "reopen", reference?: string) {
+      const user = requireSession();
+      const thread = snapshot.cubaThreads.find((t) => t.id === threadId);
+      if (!thread) throw new Error("Hilo no encontrado.");
+      const operator = snapshot.cubaOperators.find((o) => o.id === thread.operatorId);
+      const assigned = profileOwnsCubaOperator(user, operator);
+      if (action === "confirm") {
+        if (!assigned) {
+          throw new Error("Solo el operador asignado a esta operación puede poner la referencia.");
+        }
+        const ref = (reference ?? "").trim() || thread.parsedReference.trim();
+        if (!ref) throw new Error("Indica la referencia de confirmación.");
+      } else if (user.role !== "admin" && !assigned) {
+        throw new Error("No puedes cambiar este hilo.");
+      }
+      const now = new Date().toISOString();
+      if (action === "reopen") {
+        persist({
+          ...snapshot,
+          cubaThreads: snapshot.cubaThreads.map((t) =>
+            t.id === threadId
+              ? { ...t, status: "awaiting_reply", timeoutAt: new Date(Date.now() + CUBA_TIMEOUT_MS).toISOString() }
+              : t,
+          ),
+        });
+        return;
+      }
+      const verdict = action === "confirm" ? "success" : "failure";
+      persist(
+        applyCubaVerdict(
+          snapshot,
+          thread,
+          verdict,
+          action === "confirm"
+            ? (reference ?? "").trim() || thread.parsedReference
+            : reference?.trim() || thread.parsedReference || thread.code,
+          now,
+          true,
+        ),
+      );
+    },
+    tickCubaTimeouts() {
+      const now = Date.now();
+      const stamp = new Date(now).toISOString();
+      let n = 0;
+      const cubaThreads = (snapshot.cubaThreads ?? []).map((t) => {
+        if (!timedOut(t, now)) return t;
+        n += 1;
+        return { ...t, status: "timed_out" as const, timeoutAt: stamp };
+      });
+      if (n) persist({ ...snapshot, cubaThreads });
+      return n;
     },
     provinceHeadroom(provinceId: string) {
       return provinceRoom(snapshot, provinceId);
@@ -549,6 +1314,8 @@ function apiFrom(snapshot: Snapshot): StoreApi {
         cancelledAt: null,
         cancelledBy: null,
         notes: input.notes.trim(),
+        trackingCode: makeTrackingCode(snapshot.operations.map((o) => o.trackingCode)),
+        cubaOperatorId: "",
       };
 
       const nextMovements = [...snapshot.provinceMovements];
@@ -970,9 +1737,12 @@ function apiFrom(snapshot: Snapshot): StoreApi {
       });
     },
     confirmOperation(operationId: string) {
-      requireAdmin();
+      const user = requireSession();
       const operation = snapshot.operations.find((o) => o.id === operationId);
       if (!operation) throw new Error("Operación no encontrada.");
+      if (user.role !== "admin" && operation.createdBy !== user.id) {
+        throw new Error("Solo el asesor de la ficha o el administrador pueden cerrar la operación.");
+      }
       const blocked = confirmBlockReason(operation, snapshot.legs);
       if (blocked) throw new Error(blocked);
       persist({
@@ -998,6 +1768,8 @@ function apiFrom(snapshot: Snapshot): StoreApi {
           legs: snapshot.legs.filter((leg) => leg.operationId !== operationId),
           movements: snapshot.movements.filter((m) => m.operationId !== operationId),
           provinceMovements: snapshot.provinceMovements.filter((m) => m.operationId !== operationId),
+          cubaThreads: (snapshot.cubaThreads ?? []).filter((t) => t.operationId !== operationId),
+          cubaMessages: (snapshot.cubaMessages ?? []).filter((m) => m.operationId !== operationId),
         });
         return "removed";
       }
@@ -1050,6 +1822,11 @@ function apiFrom(snapshot: Snapshot): StoreApi {
                 collectStatus: op.collectStatus === "pending" ? "cancelled" : op.collectStatus,
               }
             : op,
+        ),
+        cubaThreads: (snapshot.cubaThreads ?? []).map((t) =>
+          t.operationId === operationId && t.status !== "auto_matched" && t.status !== "failed"
+            ? { ...t, status: "failed" as const, lastError: "Operación cancelada." }
+            : t,
         ),
       });
       return "recorded";

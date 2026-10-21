@@ -6,6 +6,9 @@ import { mapsUrl, telUrl } from "../lib/maps";
 import { formatMoney, formatRate, parseAmount } from "../lib/money";
 import { matchBeneficiary } from "../lib/beneficiaries";
 import { TransferWhatsAppPanel } from "../ui/TransferWhatsApp";
+import { CubaDispatchPanel } from "../ui/CubaDispatchPanel";
+import { ClientNotifyPanel } from "../ui/ClientNotifyPanel";
+import { CubaProcessPanel } from "../ui/CubaProcessPanel";
 import { OperationEditForm } from "../ui/OperationEditForm";
 import {
   cancelBlockReason,
@@ -66,6 +69,8 @@ export function OperationDetailPage() {
 
   const operationId = op.id;
   const isAdmin = store.session?.role === "admin";
+  const isCreator = op.createdBy === store.session?.id;
+  const canClose = isAdmin || isCreator;
   const locked = isTerminalStatus(op.status);
   const canAssign =
     isAdmin &&
@@ -134,6 +139,7 @@ export function OperationDetailPage() {
               Repetir cliente
             </Link>
           ) : null}
+          {op.trackingCode ? <span className="badge">{op.trackingCode}</span> : null}
           <span className={`badge ${statusTone(op.status)}`}>{statusLabel(op.status)}</span>
           <span className="badge">{appliedRate}</span>
         </div>
@@ -199,7 +205,7 @@ export function OperationDetailPage() {
               {op.collectStatus === "collected" ? "Recogido" : "Pendiente"}
             </span>
           </p>
-          {op.collectStatus === "pending" && !locked ? (
+          {op.collectStatus === "pending" && !locked && canClose ? (
             <button
               className="btn primary"
               onClick={() => run(() => store.setCollectStatus(operationId, "collected"))}
@@ -210,20 +216,44 @@ export function OperationDetailPage() {
         </section>
       </div>
 
-      {isAdmin && op.status !== "cancelled" ? (
+      {isAdmin && !locked ? (
         <OperationEditForm
           operation={op}
           onSave={(input) => run(() => store.updateOperation(operationId, input))}
         />
       ) : null}
 
-      {op.kind === "transfer" && op.status !== "cancelled" ? (
+      {!locked ? (
+        <CubaDispatchPanel operation={op} isAdmin={isAdmin} />
+      ) : null}
+
+      {!locked ? <CubaProcessPanel operation={op} /> : null}
+
+      {op.kind === "transfer" && !locked ? (
         <TransferWhatsAppPanel
-          isAdmin={store.session?.role === "admin"}
+          isAdmin={isAdmin}
+          trackingCode={op.trackingCode}
           cubaCardNumber={op.cubaCardNumber ?? ""}
           cubaRecipientName={op.cubaRecipientName}
           cubaPhone={op.cubaPhone}
           onSave={(input) => run(() => store.updateTransferDestination(operationId, input))}
+          onManualSend={(text) => {
+            const operatorId =
+              op.cubaOperatorId ||
+              store.snapshot.cubaOperators.find((o) => o.active && o.kinds.includes("transfer"))?.id;
+            if (!operatorId) return;
+            try {
+              store.assignCubaOperator(operationId, operatorId);
+              store.logCubaOutbound({
+                operationId,
+                operatorId,
+                channel: "wa_me",
+                body: text,
+              });
+            } catch {
+              /* el envío manual no debe bloquear wa.me */
+            }
+          }}
         />
       ) : null}
 
@@ -252,7 +282,15 @@ export function OperationDetailPage() {
             </p>
           )}
           {op.deliveryStatus === "sent" ? (
-            <p>Referencia: {op.deliveryReference}</p>
+            <>
+              <p>Referencia: {op.deliveryReference || "—"}</p>
+              {op.status !== "confirmed" && op.status !== "cancelled" ? (
+                <p className="muted">
+                  Cuba ya la marcó como realizada. El asesor o el administrador envían la
+                  confirmación por WhatsApp y correo para cerrar.
+                </p>
+              ) : null}
+            </>
           ) : canDeliver ? (
             <form
               className="row"
@@ -426,7 +464,7 @@ export function OperationDetailPage() {
       <section className="card">
         <h2>Estado de la operación</h2>
         {op.status === "confirmed" ? (
-          <p>Esta operación quedó confirmada. Ya no se edita.</p>
+          <p>Esta operación quedó confirmada. Ya no se edita; solo se puede reenviar el aviso.</p>
         ) : op.status === "cancelled" ? (
           <p>
             {cancelledByLabel(op, store.snapshot.profiles)}
@@ -438,21 +476,12 @@ export function OperationDetailPage() {
           </p>
         ) : (
           <>
-            {isAdmin ? (
-              <>
-                <p className="muted">
-                  Se confirma cuando el GYN está recogido y el envío, la recarga
-                  o la entrega de efectivo están hechos, con referencia.
-                </p>
-                <button
-                  className="btn primary"
-                  disabled={Boolean(confirmWhy)}
-                  onClick={() => run(() => store.confirmOperation(operationId))}
-                >
-                  Marcar confirmada
-                </button>
-                {confirmWhy ? <p className="muted">{confirmWhy}</p> : null}
-              </>
+            {canClose ? (
+              <p className="muted">
+                Se confirma cuando el GYN está recogido y el operador de Cuba puso
+                la referencia. El contacto de Guyana recibe WhatsApp y el asesor un
+                correo de cierre.
+              </p>
             ) : (
               <p className="muted">
                 {op.collectStatus === "collected" || op.status === "processing"
@@ -487,6 +516,24 @@ export function OperationDetailPage() {
             ) : null}
           </>
         )}
+        {canClose && op.status !== "cancelled" ? (
+          <ClientNotifyPanel
+            operation={op}
+            provinceName={province?.name}
+            references={
+              op.kind === "transfer"
+                ? legs.filter((l) => l.status === "sent" && l.reference.trim()).map((l) => l.reference)
+                : op.deliveryReference
+                  ? [op.deliveryReference]
+                  : []
+            }
+            advisorName={store.snapshot.profiles.find((p) => p.id === op.createdBy)?.displayName ?? ""}
+            advisorEmail={store.snapshot.profiles.find((p) => p.id === op.createdBy)?.email ?? ""}
+            canClose={canClose}
+            confirmWhy={op.status === "confirmed" ? null : confirmWhy}
+            onConfirm={op.status === "confirmed" ? undefined : () => store.confirmOperation(operationId)}
+          />
+        ) : null}
       </section>
     </>
   );

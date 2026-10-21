@@ -140,7 +140,7 @@ export function confirmBlockReason(op: Operation, legs: TransferLeg[]): string |
 }
 
 export function deliveryLabel(status: DeliveryStatus): string {
-  if (status === "sent") return "Hecha";
+  if (status === "sent") return "Realizada";
   if (status === "failed") return "Fallida";
   return "Pendiente";
 }
@@ -187,6 +187,18 @@ export function operationMatchesQuery(
   if (hay.includes(q)) return true;
   if (digits && hay.replace(/\D/g, "").includes(digits)) return true;
   return false;
+}
+
+export function roleLabel(role: Role): string {
+  if (role === "admin") return "Administrador";
+  if (role === "cuba") return "Cuba";
+  return "Asesor";
+}
+
+export function deskLabel(desk: string): string {
+  if (desk === "cuba") return "Cuba";
+  if (desk === "guyana") return "Guyana";
+  return "—";
 }
 
 export function cancelledByLabel(op: Operation, profiles: Profile[]): string {

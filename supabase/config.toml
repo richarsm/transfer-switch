@@ -1,0 +1,14 @@
+[functions.cuba-send]
+verify_jwt = false
+
+[functions.whatsapp-webhook]
+verify_jwt = false
+
+[functions.email-ingest]
+verify_jwt = false
+
+[functions.integrations]
+verify_jwt = false
+
+[functions.integrations-oauth]
+verify_jwt = false

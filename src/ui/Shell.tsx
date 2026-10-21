@@ -1,26 +1,75 @@
-import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, NavLink, Outlet } from "react-router-dom";
 import { useStore } from "../data/StoreContext";
+import { notifyInboxArrival, playReviewChime, unlockChime } from "../lib/chime";
 import { formatHavanaLong } from "../lib/havana";
 import { formatMoney } from "../lib/money";
-import { awaitingAdminProcess } from "../lib/operations";
+import { canSeeOperation, inboxActionCount, inboxOpenCount, threadsForProfile } from "../lib/cuba-inbox";
+import { awaitingAdminProcess, roleLabel } from "../lib/operations";
 
 const links = [
   { to: "/", label: "Tablero", end: true },
   { to: "/operaciones", label: "Operaciones", end: false },
+  { to: "/bandeja", label: "Bandeja Cuba", end: false },
   { to: "/beneficiarios", label: "Beneficiarios", end: false },
   { to: "/tarjetas", label: "Tarjetas", end: false },
   { to: "/provincias", label: "Provincias", end: false },
   { to: "/apertura", label: "Apertura", admin: true },
   { to: "/viajes", label: "Viajes", end: false },
   { to: "/operadores", label: "Operadores", admin: true },
+  { to: "/configuracion", label: "Configuración", admin: true },
 ];
 
 export function Shell() {
   const { session, snapshot, logout } = useStore();
   const isAdmin = session?.role === "admin";
-  const pendingCount = snapshot.operations.filter(awaitingAdminProcess).length;
+  const isCuba = session?.role === "cuba";
+  const pendingCount = snapshot.operations.filter(
+    (op) => awaitingAdminProcess(op) && canSeeOperation(session, op, snapshot.cubaOperators ?? []),
+  ).length;
+  const accessCount = isAdmin
+    ? (snapshot.accessRequests ?? []).filter((r) => r.status === "pending").length
+    : 0;
+  const visibleInbox = threadsForProfile(session, snapshot.cubaThreads ?? [], snapshot.cubaOperators ?? []);
+  const inboxCount = inboxOpenCount(visibleInbox);
+  const inboxAlertCount = inboxActionCount(visibleInbox);
   const [menuOpen, setMenuOpen] = useState(false);
+  const alertBaseline = useRef<{ pending: number; inbox: number; inboxAlert: number; access: number } | null>(null);
+
+  useEffect(() => {
+    function arm() {
+      unlockChime();
+    }
+    window.addEventListener("pointerdown", arm, { once: true });
+    window.addEventListener("keydown", arm, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", arm);
+      window.removeEventListener("keydown", arm);
+    };
+  }, []);
+
+  useEffect(() => {
+    const next = {
+      pending: pendingCount,
+      inbox: inboxCount,
+      inboxAlert: inboxAlertCount,
+      access: accessCount,
+    };
+    if (!alertBaseline.current) {
+      alertBaseline.current = next;
+      return;
+    }
+    const grewAdmin = isAdmin && next.pending > alertBaseline.current.pending;
+    const grewInbox = next.inbox > alertBaseline.current.inbox;
+    const grewInboxAlert = next.inboxAlert > alertBaseline.current.inboxAlert;
+    const grewAccess = isAdmin && next.access > alertBaseline.current.access;
+    alertBaseline.current = next;
+    if (grewInbox && (isCuba || !isAdmin)) {
+      notifyInboxArrival(next.inbox);
+      return;
+    }
+    if (grewAdmin || grewInboxAlert || grewAccess) playReviewChime();
+  }, [isAdmin, isCuba, pendingCount, inboxCount, inboxAlertCount, accessCount]);
 
   useEffect(() => {
     document.body.style.overflow = menuOpen ? "hidden" : "";
@@ -37,7 +86,21 @@ export function Shell() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const nav = links.filter((l) => !l.admin || isAdmin);
+  useEffect(() => {
+    const base = "Transfer Switch";
+    if (isCuba && inboxCount > 0) {
+      document.title = `(${inboxCount}) ${base}`;
+      return () => {
+        document.title = base;
+      };
+    }
+    document.title = base;
+    return undefined;
+  }, [isCuba, inboxCount]);
+
+  const nav = isCuba
+    ? [{ to: "/bandeja", label: "Bandeja", end: true }]
+    : links.filter((l) => !l.admin || isAdmin);
 
   return (
     <div className="app-shell">
@@ -78,6 +141,12 @@ export function Shell() {
                 {l.to === "/operaciones" && pendingCount > 0 ? (
                   <span className="nav-count">{pendingCount}</span>
                 ) : null}
+                {l.to === "/bandeja" && inboxCount > 0 ? (
+                  <span className="nav-count">{inboxCount}</span>
+                ) : null}
+                {l.to === "/operadores" && accessCount > 0 ? (
+                  <span className="nav-count">{accessCount}</span>
+                ) : null}
               </span>
             </NavLink>
           ))}
@@ -85,8 +154,14 @@ export function Shell() {
         <div className="side-foot">
           <div>
             {session?.displayName}
+            {session?.email ? (
+              <>
+                <br />
+                <span className="side-email">{session.email}</span>
+              </>
+            ) : null}
             <br />
-            <span>{session?.role === "admin" ? "Administrador" : "Operador"}</span>
+            <span>{session ? roleLabel(session.role) : ""}</span>
           </div>
           <button className="btn ghost" onClick={logout} style={{ color: "#f0d9a0", borderColor: "#2c5446" }}>
             Salir
@@ -108,14 +183,28 @@ export function Shell() {
           <div className="brand">
             <strong>T-Transfer</strong>
           </div>
-          <OpeningRates compact />
+          {isCuba ? null : <OpeningRates compact />}
         </div>
         <div className="topbar">
           <div>
             <div className="muted">{formatHavanaLong()}</div>
           </div>
-          <OpeningRates />
+          {isCuba ? null : <OpeningRates />}
         </div>
+        {isAdmin && accessCount > 0 ? (
+          <Link className="access-alert" to="/operadores">
+            {accessCount === 1
+              ? "Hay un usuario pendiente de aprobación."
+              : `Hay ${accessCount} usuarios pendientes de aprobación.`}
+          </Link>
+        ) : null}
+        {isCuba && inboxCount > 0 ? (
+          <div className="access-alert">
+            {inboxCount === 1
+              ? "Tienes un envío pendiente en la bandeja."
+              : `Tienes ${inboxCount} envíos pendientes en la bandeja.`}
+          </div>
+        ) : null}
         <Outlet />
       </main>
     </div>

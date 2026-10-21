@@ -12,6 +12,8 @@ import { OpeningPage } from "./pages/OpeningPage";
 import { ProvincesPage } from "./pages/ProvincesPage";
 import { TravelPage } from "./pages/TravelPage";
 import { OperatorsPage } from "./pages/OperatorsPage";
+import { CubaInboxPage } from "./pages/CubaInboxPage";
+import { SettingsPage } from "./pages/SettingsPage";
 
 export function App() {
   const { session } = useStore();
@@ -20,6 +22,17 @@ export function App() {
     return (
       <Routes>
         <Route path="*" element={<LoginPage />} />
+      </Routes>
+    );
+  }
+
+  if (session.role === "cuba") {
+    return (
+      <Routes>
+        <Route element={<Shell />}>
+          <Route path="/bandeja" element={<CubaInboxPage />} />
+        </Route>
+        <Route path="*" element={<Navigate to="/bandeja" replace />} />
       </Routes>
     );
   }
@@ -37,6 +50,8 @@ export function App() {
         <Route path="/apertura" element={<OpeningPage />} />
         <Route path="/viajes" element={<TravelPage />} />
         <Route path="/operadores" element={<OperatorsPage />} />
+        <Route path="/bandeja" element={<CubaInboxPage />} />
+        <Route path="/configuracion" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

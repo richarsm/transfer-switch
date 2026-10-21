@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { useStore } from "../data/StoreContext";
 import { formatMoney, parseAmount } from "../lib/money";
 
@@ -31,6 +32,13 @@ export function ProvincesPage() {
       <p className="muted">
         Efectivo CUP y USD para entregas en Cuba. Una operación de efectivo
         solo se crea si la provincia tiene saldo disponible.
+        {isAdmin ? (
+          <>
+            {" "}
+            Los operadores cubanos de Transfermóvil se registran en{" "}
+            <Link to="/operadores">Operadores</Link>.
+          </>
+        ) : null}
       </p>
       {error ? <div className="error">{error}</div> : null}
       <section className="card">

@@ -2,6 +2,29 @@ import fs from "node:fs";
 import path from "node:path";
 import pg from "pg";
 
+function loadEnv(file) {
+  const p = path.resolve(file);
+  if (!fs.existsSync(p)) return;
+  for (const raw of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const i = line.indexOf("=");
+    if (i < 1) continue;
+    const key = line.slice(0, i).trim();
+    let val = line.slice(i + 1).trim();
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    if (!process.env[key]) process.env[key] = val;
+  }
+}
+
+loadEnv(".env");
+loadEnv(".env.local");
+
 const password = process.env.SUPABASE_DB_PASSWORD;
 if (!password) {
   console.error("Falta SUPABASE_DB_PASSWORD");

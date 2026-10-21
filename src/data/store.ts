@@ -1,4 +1,5 @@
 import type {
+  AccessDesk,
   Beneficiary,
   CardAccount,
   CollectStatus,
@@ -13,6 +14,9 @@ import type {
   Snapshot,
   TravelOffer,
   CashCourier,
+  CubaOperator,
+  CubaThread,
+  MessageChannel,
 } from "../domain/types";
 
 export type CardHeadroom = {
@@ -66,6 +70,18 @@ export type StoreApi = {
   currentOpening: Opening | null;
   login: (userId: string) => void;
   logout: () => void;
+  cloudAuth: boolean;
+  authNotice: string | null;
+  pendingAuth: { email: string; googleName: string } | null;
+  signInWithGoogle: () => Promise<void>;
+  requestAccess: (input: {
+    displayName: string;
+    phone: string;
+    note: string;
+    desk: AccessDesk | "";
+  }) => Promise<void>;
+  approveAccessRequest: (id: string, role: Role) => void;
+  rejectAccessRequest: (id: string) => void;
   upsertProfile: (input: {
     id?: string;
     email: string;
@@ -93,6 +109,31 @@ export type StoreApi = {
   }) => void;
   upsertCourier: (input: Omit<CashCourier, "id"> & { id?: string }) => string;
   deleteCourier: (id: string) => void;
+  upsertCubaOperator: (input: Omit<CubaOperator, "id"> & { id?: string }) => string;
+  deleteCubaOperator: (id: string) => void;
+  assignCubaOperator: (operationId: string, operatorId: string) => string;
+  logCubaOutbound: (input: {
+    operationId: string;
+    operatorId: string;
+    channel: MessageChannel;
+    body: string;
+    cloudSent?: boolean;
+  }) => void;
+  ingestCubaReply: (input: {
+    body: string;
+    fromPhone?: string;
+    fromEmail?: string;
+    channel?: MessageChannel;
+    mediaUrl?: string;
+    externalId?: string;
+    threadId?: string;
+  }) => CubaThread | undefined;
+  reviewCubaThread: (
+    threadId: string,
+    action: "confirm" | "fail" | "reopen",
+    reference?: string,
+  ) => void;
+  tickCubaTimeouts: () => number;
   provinceHeadroom: (provinceId: string) => ProvinceHeadroom;
   createOperation: (input: {
     kind: OperationKind;
@@ -133,6 +174,7 @@ export type StoreApi = {
     cancelOperation: (operationId: string) => "removed" | "recorded";
   cardHeadroom: (cardId: string, businessDate: string) => CardHeadroom;
   dashboard: (from: string, to: string) => DashboardTotals;
+  upsertSettings: (input: { advisorCommissionPercent: number }) => void;
   upsertTravel: (input: Omit<TravelOffer, "id"> & { id?: string }) => string;
   replaceItinerary: (offerId: string, legs: Omit<ItineraryLeg, "id" | "offerId" | "order">[]) => void;
 };

@@ -3,11 +3,13 @@ import { Link, useNavigate } from "react-router-dom";
 import { useStore } from "../data/StoreContext";
 import { formatHavanaDateTime, havanaDateISO } from "../lib/havana";
 import { formatMoney } from "../lib/money";
+import { canSeeOperation } from "../lib/cuba-inbox";
 import {
   awaitingAdminProcess,
   cancelledByLabel,
   kindLabel,
   modeLabel,
+  roleLabel,
   operationMatchesQuery,
   operationQueue,
   statusLabel,
@@ -24,20 +26,23 @@ const QUEUES: Array<{ id: Queue; label: string }> = [
 ];
 
 export function OperationsPage() {
-  const { snapshot } = useStore();
+  const { snapshot, session } = useStore();
   const [queue, setQueue] = useState<Queue>("pending");
   const [query, setQuery] = useState("");
   const people = new Map(snapshot.profiles.map((p) => [p.id, p]));
+  const visibleOps = snapshot.operations.filter((op) =>
+    canSeeOperation(session, op, snapshot.cubaOperators ?? []),
+  );
 
   const counts = useMemo(() => {
-    const pending = snapshot.operations.filter(awaitingAdminProcess).length;
-    const done = snapshot.operations.filter((op) => op.status === "confirmed").length;
-    const cancelled = snapshot.operations.filter((op) => op.status === "cancelled").length;
+    const pending = visibleOps.filter(awaitingAdminProcess).length;
+    const done = visibleOps.filter((op) => op.status === "confirmed").length;
+    const cancelled = visibleOps.filter((op) => op.status === "cancelled").length;
     return { pending, done, cancelled };
-  }, [snapshot.operations]);
+  }, [visibleOps]);
 
   const rows = useMemo(() => {
-    const filtered = snapshot.operations.filter((op) => {
+    const filtered = visibleOps.filter((op) => {
       if (operationQueue(op) !== queue) return false;
       const provinceName = snapshot.provinces.find((p) => p.id === op.provinceId)?.name ?? "";
       return operationMatchesQuery(op, query, snapshot.profiles, provinceName);
@@ -50,7 +55,7 @@ export function OperationsPage() {
       }
       return b.createdAt.localeCompare(a.createdAt);
     });
-  }, [snapshot.operations, snapshot.profiles, snapshot.provinces, queue, query]);
+  }, [visibleOps, snapshot.profiles, snapshot.provinces, queue, query]);
 
   return (
     <>
@@ -58,7 +63,8 @@ export function OperationsPage() {
         <div>
           <h1>Operaciones</h1>
           <p className="muted" style={{ margin: "6px 0 0" }}>
-            El asesor crea la ficha. El administrador procesa la cola y la cierra.
+            El asesor crea la ficha. El operador de Cuba procesa lo asignado. El asesor de la ficha
+            o el administrador la cierran.
           </p>
         </div>
         <Link className="btn primary" to="/operaciones/nueva">
@@ -92,7 +98,7 @@ export function OperationsPage() {
         </label>
         {rows.length === 0 ? (
           <p className="muted">
-            {snapshot.operations.length === 0
+            {visibleOps.length === 0
               ? `Aún no hay operaciones. Hoy en Cuba: ${havanaDateISO()}.`
               : query.trim()
                 ? "No hay coincidencias en esta cola."
@@ -142,11 +148,10 @@ function OperationRow({
   const navigate = useNavigate();
   const href = `/operaciones/${op.id}`;
   const who = people.get(op.createdBy);
-  const roleLabel = who?.role === "admin" ? "Administrador" : "Asesor";
   return (
     <tr className="row-link" onClick={() => navigate(href)}>
       <td>
-        {roleLabel}: {who?.displayName ?? "—"}
+        {who ? roleLabel(who.role) : "Asesor"}: {who?.displayName ?? "—"}
       </td>
       <td>{kindLabel(op.kind)}</td>
       <td>{modeLabel(op.mode, op.kind)}</td>

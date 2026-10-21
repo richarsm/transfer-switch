@@ -1,5 +1,12 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useStore } from "../data/StoreContext";
+import {
+  advisorCommission,
+  advisorVolume,
+  commissionPercent,
+  completedTransfers,
+} from "../lib/advisor";
+import { canSeeOperation } from "../lib/cuba-inbox";
 import { havanaDateISO, havanaMonthPrefix } from "../lib/havana";
 import { formatMoney } from "../lib/money";
 
@@ -10,8 +17,25 @@ export function DashboardPage() {
   const monthStart = `${havanaMonthPrefix()}-01`;
   const day = store.dashboard(today, today);
   const month = store.dashboard(monthStart, today);
+  const isAdmin = store.session?.role === "admin";
+  const isAdvisor = store.session?.role === "operator";
+  const percent = commissionPercent(store.snapshot.settings);
+  const transfers = completedTransfers(
+    store.snapshot.operations,
+    store.snapshot.legs,
+    today,
+    isAdvisor ? store.session?.id : undefined,
+  );
+  const mine = store.session
+    ? advisorVolume(store.snapshot.operations, store.session.id, today)
+    : { count: 0, totalGyn: 0, collectedGyn: 0 };
+  const dailyBalance = advisorCommission(mine.totalGyn, percent);
   const pendingOps = store.snapshot.operations.filter(
-    (o) => o.status !== "cancelled" && o.status !== "confirmed" && o.collectStatus === "pending",
+    (o) =>
+      o.status !== "cancelled" &&
+      o.status !== "confirmed" &&
+      o.collectStatus === "pending" &&
+      canSeeOperation(store.session, o, store.snapshot.cubaOperators ?? []),
   );
 
   return (
@@ -24,6 +48,28 @@ export function DashboardPage() {
       </div>
       <h2>Hoy</h2>
       <div className="stats">
+        <div className="stat">
+          <b>{formatMoney(transfers.cup, "CUP")}</b>
+          <b className="stat-sub">{formatMoney(transfers.gyn, "GYN")}</b>
+          <span>
+            Transferencias realizadas
+            {transfers.count ? ` · ${transfers.count}` : ""}
+          </span>
+        </div>
+        {isAdvisor ? (
+          <div className="stat">
+            <b>{formatMoney(dailyBalance, "GYN")}</b>
+            <span>
+              Saldo diario · {percent}% de {formatMoney(mine.totalGyn, "GYN")}
+            </span>
+          </div>
+        ) : null}
+        {isAdmin ? (
+          <div className="stat">
+            <b>{formatMoney(day.collectedGyn, "GYN")}</b>
+            <span>Recolectado hoy</span>
+          </div>
+        ) : null}
         <div className="stat">
           <b>{formatMoney(day.transferredCup, "CUP")}</b>
           <span>Transferido a tarjeta</span>

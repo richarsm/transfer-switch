@@ -1,14 +1,24 @@
 import type {
+  AccessDesk,
+  AccessRequest,
+  AccessRequestStatus,
+  AppSettings,
   Beneficiary,
   CardAccount,
   CardMovement,
   CashCourier,
+  CubaMessage,
+  CubaOperator,
+  CubaOperatorKind,
+  CubaThread,
+  CubaThreadStatus,
   ItineraryLeg,
   Opening,
   Operation,
   Profile,
   Province,
   ProvinceMovement,
+  Role,
   Snapshot,
   TransferLeg,
   TravelOffer,
@@ -23,6 +33,8 @@ function n(value: unknown) {
 function empty(): Omit<Snapshot, "sessionUserId"> {
   return {
     profiles: [],
+    accessRequests: [],
+    settings: { advisorCommissionPercent: 6 },
     openings: [],
     cards: [],
     operations: [],
@@ -34,10 +46,20 @@ function empty(): Omit<Snapshot, "sessionUserId"> {
     provinceMovements: [],
     beneficiaries: [],
     couriers: [],
+    cubaOperators: [],
+    cubaThreads: [],
+    cubaMessages: [],
   };
 }
 
-export async function pullSnapshot(): Promise<Omit<Snapshot, "sessionUserId">> {
+export type CloudPull = Omit<Snapshot, "sessionUserId"> & {
+  missingCubaInbox: boolean;
+  missingCouriers: boolean;
+  missingAccessRequests: boolean;
+  missingSettings: boolean;
+};
+
+export async function pullSnapshot(): Promise<CloudPull> {
   const sb = getSupabase();
   const [
     profiles,
@@ -52,6 +74,11 @@ export async function pullSnapshot(): Promise<Omit<Snapshot, "sessionUserId">> {
     provinceMovements,
     beneficiaries,
     couriers,
+    cubaOperators,
+    cubaThreads,
+    cubaMessages,
+    accessRequests,
+    settings,
   ] = await Promise.all([
     sb.from("profiles").select("*"),
     sb.from("openings").select("*"),
@@ -65,6 +92,11 @@ export async function pullSnapshot(): Promise<Omit<Snapshot, "sessionUserId">> {
     sb.from("province_movements").select("*"),
     sb.from("beneficiaries").select("*"),
     sb.from("cash_couriers").select("*"),
+    sb.from("cuba_operators").select("*"),
+    sb.from("cuba_threads").select("*"),
+    sb.from("cuba_messages").select("*"),
+    sb.from("access_requests").select("*"),
+    sb.from("app_settings").select("*").eq("id", "default").maybeSingle(),
   ]);
 
   const firstError = [
@@ -84,6 +116,9 @@ export async function pullSnapshot(): Promise<Omit<Snapshot, "sessionUserId">> {
   if (couriers.error && !missingTable(couriers.error)) {
     throw new Error(couriers.error.message);
   }
+  for (const extra of [cubaOperators, cubaThreads, cubaMessages, accessRequests, settings]) {
+    if (extra.error && !missingTable(extra.error)) throw new Error(extra.error.message);
+  }
 
   return {
     profiles: (profiles.data ?? []).map(mapProfile),
@@ -98,6 +133,17 @@ export async function pullSnapshot(): Promise<Omit<Snapshot, "sessionUserId">> {
     provinceMovements: (provinceMovements.data ?? []).map(mapProvinceMovement),
     beneficiaries: (beneficiaries.data ?? []).map(mapBeneficiary),
     couriers: (couriers.data ?? []).map(mapCourier),
+    cubaOperators: (cubaOperators.data ?? []).map(mapCubaOperator),
+    cubaThreads: (cubaThreads.data ?? []).map(mapCubaThread),
+    cubaMessages: (cubaMessages.data ?? []).map(mapCubaMessage),
+    accessRequests: (accessRequests.data ?? []).map(mapAccessRequest),
+    settings: mapSettings(settings.data),
+    missingCouriers: Boolean(couriers.error && missingTable(couriers.error)),
+    missingCubaInbox: [cubaOperators, cubaThreads, cubaMessages].some(
+      (r) => r.error && missingTable(r.error),
+    ),
+    missingAccessRequests: Boolean(accessRequests.error && missingTable(accessRequests.error)),
+    missingSettings: Boolean(settings.error && missingTable(settings.error)),
   };
 }
 
@@ -108,6 +154,9 @@ export async function pushSnapshot(snapshot: Snapshot) {
   await deleteGone("itinerary_legs", snapshot.itineraries);
   await deleteGone("beneficiaries", snapshot.beneficiaries);
   await deleteGoneOptional("cash_couriers", snapshot.couriers ?? []);
+  await deleteGoneOptional("cuba_messages", snapshot.cubaMessages ?? []);
+  await deleteGoneOptional("cuba_threads", snapshot.cubaThreads ?? []);
+  await deleteGoneOptional("cuba_operators", snapshot.cubaOperators ?? []);
   await deleteGone("operations", snapshot.operations);
   await deleteGone("travel_offers", snapshot.travels);
 
@@ -165,43 +214,84 @@ export async function pushSnapshot(snapshot: Snapshot) {
       closed_at: o.closedAt,
     })),
   );
-  await upsertRows(
-    "operations",
-    snapshot.operations.map((op) => ({
-      id: op.id,
-      opening_id: op.openingId,
-      kind: op.kind,
-      mode: op.mode,
-      status: op.status,
-      created_by: op.createdBy,
-      created_at: op.createdAt,
-      contact_name: op.contactName,
-      contact_phone: op.contactPhone,
-      address: op.address,
-      lat: op.lat,
-      lng: op.lng,
-      cuba_phone: op.cubaPhone,
-      cuba_recipient_name: op.cubaRecipientName,
-      cuba_card_number: op.cubaCardNumber,
-      cuba_address: op.cubaAddress,
-      province_id: op.provinceId || null,
-      amount_gyn: op.amountGyn,
-      amount_cup: op.amountCup,
-      amount_usd: op.amountUsd,
-      rate_cup_per_1000_gyn: op.rateCupPer1000Gyn,
-      rate_cash_cup_per_1000_gyn: op.rateCashCupPer1000Gyn,
-      rate_cash_usd_per_1000_gyn: op.rateCashUsdPer1000Gyn,
-      collect_status: op.collectStatus,
-      collected_at: op.collectedAt,
-      delivery_status: op.deliveryStatus,
-      delivery_reference: op.deliveryReference,
-      delivered_at: op.deliveredAt,
-      confirmed_at: op.confirmedAt,
-      cancelled_at: op.cancelledAt,
-      cancelled_by: op.cancelledBy,
-      notes: op.notes,
-    })),
-  );
+  const operationRows = snapshot.operations.map((op) => ({
+    id: op.id,
+    opening_id: op.openingId,
+    kind: op.kind,
+    mode: op.mode,
+    status: op.status,
+    created_by: op.createdBy,
+    created_at: op.createdAt,
+    contact_name: op.contactName,
+    contact_phone: op.contactPhone,
+    address: op.address,
+    lat: op.lat,
+    lng: op.lng,
+    cuba_phone: op.cubaPhone,
+    cuba_recipient_name: op.cubaRecipientName,
+    cuba_card_number: op.cubaCardNumber,
+    cuba_address: op.cubaAddress,
+    province_id: op.provinceId || null,
+    amount_gyn: op.amountGyn,
+    amount_cup: op.amountCup,
+    amount_usd: op.amountUsd,
+    rate_cup_per_1000_gyn: op.rateCupPer1000Gyn,
+    rate_cash_cup_per_1000_gyn: op.rateCashCupPer1000Gyn,
+    rate_cash_usd_per_1000_gyn: op.rateCashUsdPer1000Gyn,
+    collect_status: op.collectStatus,
+    collected_at: op.collectedAt,
+    delivery_status: op.deliveryStatus,
+    delivery_reference: op.deliveryReference,
+    delivered_at: op.deliveredAt,
+    confirmed_at: op.confirmedAt,
+    cancelled_at: op.cancelledAt,
+    cancelled_by: op.cancelledBy,
+    notes: op.notes,
+    tracking_code: op.trackingCode ?? "",
+    cuba_operator_id: op.cubaOperatorId || null,
+  }));
+  try {
+    await upsertRows("operations", operationRows);
+  } catch (err) {
+    if (!missingColumn(err)) throw err;
+    await upsertRows(
+      "operations",
+      operationRows.map((row) => ({
+        id: row.id,
+        opening_id: row.opening_id,
+        kind: row.kind,
+        mode: row.mode,
+        status: row.status,
+        created_by: row.created_by,
+        created_at: row.created_at,
+        contact_name: row.contact_name,
+        contact_phone: row.contact_phone,
+        address: row.address,
+        lat: row.lat,
+        lng: row.lng,
+        cuba_phone: row.cuba_phone,
+        cuba_recipient_name: row.cuba_recipient_name,
+        cuba_card_number: row.cuba_card_number,
+        cuba_address: row.cuba_address,
+        province_id: row.province_id,
+        amount_gyn: row.amount_gyn,
+        amount_cup: row.amount_cup,
+        amount_usd: row.amount_usd,
+        rate_cup_per_1000_gyn: row.rate_cup_per_1000_gyn,
+        rate_cash_cup_per_1000_gyn: row.rate_cash_cup_per_1000_gyn,
+        rate_cash_usd_per_1000_gyn: row.rate_cash_usd_per_1000_gyn,
+        collect_status: row.collect_status,
+        collected_at: row.collected_at,
+        delivery_status: row.delivery_status,
+        delivery_reference: row.delivery_reference,
+        delivered_at: row.delivered_at,
+        confirmed_at: row.confirmed_at,
+        cancelled_at: row.cancelled_at,
+        cancelled_by: row.cancelled_by,
+        notes: row.notes,
+      })),
+    );
+  }
   await upsertRows(
     "transfer_legs",
     snapshot.legs.map((l) => ({
@@ -245,6 +335,50 @@ export async function pushSnapshot(snapshot: Snapshot) {
       name: c.name,
       phone: c.phone,
       active: c.active,
+    })),
+  );
+  await upsertOptional(
+    "cuba_operators",
+    (snapshot.cubaOperators ?? []).map((o) => ({
+      id: o.id,
+      name: o.name,
+      phone: o.phone,
+      email: o.email,
+      profile_id: o.profileId || null,
+      active: o.active,
+      kinds: o.kinds,
+    })),
+  );
+  await upsertOptional(
+    "cuba_threads",
+    (snapshot.cubaThreads ?? []).map((t) => ({
+      id: t.id,
+      operation_id: t.operationId,
+      operator_id: t.operatorId,
+      code: t.code,
+      status: t.status,
+      channel: t.channel,
+      assigned_at: t.assignedAt,
+      sent_at: t.sentAt,
+      replied_at: t.repliedAt,
+      timeout_at: t.timeoutAt,
+      parsed_reference: t.parsedReference,
+      last_error: t.lastError,
+    })),
+  );
+  await upsertOptional(
+    "cuba_messages",
+    (snapshot.cubaMessages ?? []).map((m) => ({
+      id: m.id,
+      thread_id: m.threadId,
+      operation_id: m.operationId,
+      operator_id: m.operatorId,
+      channel: m.channel,
+      direction: m.direction,
+      body: m.body,
+      media_url: m.mediaUrl,
+      external_id: m.externalId,
+      created_at: m.createdAt,
     })),
   );
   await upsertRows(
@@ -297,6 +431,29 @@ export async function pushSnapshot(snapshot: Snapshot) {
       notes: l.notes,
     })),
   );
+  await upsertOptional("app_settings", [
+    {
+      id: "default",
+      advisor_commission_percent: snapshot.settings?.advisorCommissionPercent ?? 6,
+      updated_at: new Date().toISOString(),
+    },
+  ]);
+  await upsertOptional(
+    "access_requests",
+    (snapshot.accessRequests ?? []).map((r) => ({
+      id: r.id,
+      email: r.email,
+      display_name: r.displayName,
+      phone: r.phone,
+      note: r.note,
+      desk: r.desk,
+      status: r.status,
+      decided_role: r.decidedRole,
+      decided_by: r.decidedBy || null,
+      decided_at: r.decidedAt,
+      created_at: r.createdAt,
+    })),
+  );
 }
 
 async function deleteGone(table: string, rows: Array<{ id: string }>) {
@@ -332,14 +489,24 @@ async function upsertOptional(table: string, rows: Array<Record<string, unknown>
   }
 }
 
+function errMessage(err: unknown): string {
+  if (err && typeof err === "object" && "message" in err) return String((err as { message: string }).message);
+  return String(err);
+}
+
 function missingTable(err: unknown): boolean {
-  const message =
-    err && typeof err === "object" && "message" in err ? String((err as { message: string }).message) : String(err);
+  const message = errMessage(err);
   const code = err && typeof err === "object" && "code" in err ? String((err as { code: string }).code) : "";
   return (
     code === "PGRST205" ||
     code === "42P01" ||
     /could not find the table|does not exist|schema cache/i.test(message)
+  );
+}
+
+function missingColumn(err: unknown): boolean {
+  return /could not find the ['"]?(tracking_code|cuba_operator_id)['"]? column|column .*tracking_code.* does not exist|column .*cuba_operator_id.* does not exist/i.test(
+    errMessage(err),
   );
 }
 
@@ -356,6 +523,11 @@ const CLOUD_TABLES = [
   "province_movements",
   "beneficiaries",
   "cash_couriers",
+  "cuba_operators",
+  "cuba_threads",
+  "cuba_messages",
+  "access_requests",
+  "app_settings",
 ] as const;
 
 export function subscribeCloud(onChange: () => void) {
@@ -379,9 +551,64 @@ function mapProfile(row: Record<string, unknown>): Profile {
     email: String(row.email),
     displayName: String(row.display_name ?? ""),
     phone: String(row.phone ?? ""),
-    role: row.role === "admin" ? "admin" : "operator",
+    role: row.role === "admin" ? "admin" : row.role === "cuba" ? "cuba" : "operator",
     active: Boolean(row.active),
   };
+}
+
+function mapRole(value: unknown): Role | null {
+  if (value === "admin" || value === "operator" || value === "cuba") return value;
+  return null;
+}
+
+function mapSettings(row: Record<string, unknown> | null | undefined): AppSettings {
+  if (!row) return { advisorCommissionPercent: 6 };
+  const percent = Number(row.advisor_commission_percent);
+  if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+    return { advisorCommissionPercent: 6 };
+  }
+  return { advisorCommissionPercent: percent };
+}
+
+function mapAccessRequest(row: Record<string, unknown>): AccessRequest {
+  const desk = row.desk === "cuba" || row.desk === "guyana" ? (row.desk as AccessDesk) : "";
+  const status: AccessRequestStatus =
+    row.status === "approved" || row.status === "rejected" ? row.status : "pending";
+  return {
+    id: String(row.id),
+    email: String(row.email ?? "").trim().toLowerCase(),
+    displayName: String(row.display_name ?? ""),
+    phone: String(row.phone ?? ""),
+    note: String(row.note ?? ""),
+    desk,
+    status,
+    decidedRole: mapRole(row.decided_role),
+    decidedBy: row.decided_by ? String(row.decided_by) : null,
+    decidedAt: row.decided_at ? String(row.decided_at) : null,
+    createdAt: String(row.created_at ?? ""),
+  };
+}
+
+export async function insertAccessRequest(row: AccessRequest) {
+  const { error } = await getSupabase().from("access_requests").upsert({
+    id: row.id,
+    email: row.email,
+    display_name: row.displayName,
+    phone: row.phone,
+    note: row.note,
+    desk: row.desk,
+    status: row.status,
+    decided_role: row.decidedRole,
+    decided_by: row.decidedBy || null,
+    decided_at: row.decidedAt,
+    created_at: row.createdAt,
+  });
+  if (error) {
+    if (/duplicate|unique/i.test(error.message)) {
+      throw new Error("Ya hay una solicitud pendiente con ese correo.");
+    }
+    throw new Error(error.message);
+  }
 }
 
 function mapOpening(row: Record<string, unknown>): Opening {
@@ -460,6 +687,8 @@ function mapOperation(row: Record<string, unknown>): Operation {
     cancelledAt: row.cancelled_at ? String(row.cancelled_at) : null,
     cancelledBy: row.cancelled_by ? String(row.cancelled_by) : null,
     notes: String(row.notes ?? ""),
+    trackingCode: String(row.tracking_code ?? ""),
+    cubaOperatorId: row.cuba_operator_id ? String(row.cuba_operator_id) : "",
   };
 }
 
@@ -569,6 +798,65 @@ function mapCourier(row: Record<string, unknown>): CashCourier {
     name: String(row.name ?? ""),
     phone: String(row.phone ?? ""),
     active: row.active !== false,
+  };
+}
+
+function mapCubaOperator(row: Record<string, unknown>): CubaOperator {
+  const kinds = Array.isArray(row.kinds)
+    ? (row.kinds as string[]).filter((k): k is CubaOperatorKind => k === "transfer" || k === "mobile_recharge")
+    : (["transfer", "mobile_recharge"] as CubaOperatorKind[]);
+  return {
+    id: String(row.id),
+    name: String(row.name ?? ""),
+    phone: String(row.phone ?? ""),
+    email: String(row.email ?? ""),
+    profileId: row.profile_id ? String(row.profile_id) : "",
+    active: row.active !== false,
+    kinds: kinds.length ? kinds : ["transfer", "mobile_recharge"],
+  };
+}
+
+function mapCubaThread(row: Record<string, unknown>): CubaThread {
+  const status = String(row.status) as CubaThreadStatus;
+  const allowed: CubaThreadStatus[] = [
+    "queued",
+    "sent",
+    "awaiting_reply",
+    "auto_matched",
+    "needs_review",
+    "timed_out",
+    "failed",
+  ];
+  const channel = String(row.channel);
+  return {
+    id: String(row.id),
+    operationId: String(row.operation_id),
+    operatorId: String(row.operator_id),
+    code: String(row.code ?? ""),
+    status: allowed.includes(status) ? status : "queued",
+    channel: channel === "email" || channel === "whatsapp" ? channel : "wa_me",
+    assignedAt: String(row.assigned_at ?? ""),
+    sentAt: row.sent_at ? String(row.sent_at) : null,
+    repliedAt: row.replied_at ? String(row.replied_at) : null,
+    timeoutAt: row.timeout_at ? String(row.timeout_at) : null,
+    parsedReference: String(row.parsed_reference ?? ""),
+    lastError: String(row.last_error ?? ""),
+  };
+}
+
+function mapCubaMessage(row: Record<string, unknown>): CubaMessage {
+  const channel = String(row.channel);
+  return {
+    id: String(row.id),
+    threadId: String(row.thread_id),
+    operationId: String(row.operation_id),
+    operatorId: String(row.operator_id),
+    channel: channel === "email" || channel === "whatsapp" ? channel : "wa_me",
+    direction: row.direction === "in" ? "in" : "out",
+    body: String(row.body ?? ""),
+    mediaUrl: String(row.media_url ?? ""),
+    externalId: String(row.external_id ?? ""),
+    createdAt: String(row.created_at ?? ""),
   };
 }
 

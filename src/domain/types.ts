@@ -1,4 +1,4 @@
-export type Role = "admin" | "operator";
+export type Role = "admin" | "operator" | "cuba";
 export type Currency = "GYN" | "CUP" | "USDT" | "USD";
 export type PeriodKind = "day" | "week";
 export type OpeningStatus = "open" | "closed";
@@ -22,6 +22,23 @@ export type Profile = {
   phone: string;
   role: Role;
   active: boolean;
+};
+
+export type AccessRequestStatus = "pending" | "approved" | "rejected";
+export type AccessDesk = "guyana" | "cuba";
+
+export type AccessRequest = {
+  id: string;
+  email: string;
+  displayName: string;
+  phone: string;
+  note: string;
+  desk: AccessDesk | "";
+  status: AccessRequestStatus;
+  decidedRole: Role | null;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  createdAt: string;
 };
 
 export type Opening = {
@@ -124,6 +141,8 @@ export type Operation = {
   cancelledAt: string | null;
   cancelledBy: string | null;
   notes: string;
+  trackingCode: string;
+  cubaOperatorId: string;
 };
 
 export type Province = {
@@ -141,6 +160,56 @@ export type CashCourier = {
   name: string;
   phone: string;
   active: boolean;
+};
+
+export type CubaOperatorKind = "transfer" | "mobile_recharge";
+export type MessageChannel = "whatsapp" | "email" | "wa_me";
+export type MessageDirection = "out" | "in";
+export type CubaThreadStatus =
+  | "queued"
+  | "sent"
+  | "awaiting_reply"
+  | "auto_matched"
+  | "needs_review"
+  | "timed_out"
+  | "failed";
+
+export type CubaOperator = {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  profileId: string;
+  active: boolean;
+  kinds: CubaOperatorKind[];
+};
+
+export type CubaThread = {
+  id: string;
+  operationId: string;
+  operatorId: string;
+  code: string;
+  status: CubaThreadStatus;
+  channel: MessageChannel;
+  assignedAt: string;
+  sentAt: string | null;
+  repliedAt: string | null;
+  timeoutAt: string | null;
+  parsedReference: string;
+  lastError: string;
+};
+
+export type CubaMessage = {
+  id: string;
+  threadId: string;
+  operationId: string;
+  operatorId: string;
+  channel: MessageChannel;
+  direction: MessageDirection;
+  body: string;
+  mediaUrl: string;
+  externalId: string;
+  createdAt: string;
 };
 
 export type ProvinceMovement = {
@@ -177,8 +246,14 @@ export type ItineraryLeg = {
   notes: string;
 };
 
+export type AppSettings = {
+  advisorCommissionPercent: number;
+};
+
 export type Snapshot = {
   profiles: Profile[];
+  accessRequests: AccessRequest[];
+  settings: AppSettings;
   sessionUserId: string | null;
   openings: Opening[];
   cards: CardAccount[];
@@ -191,4 +266,7 @@ export type Snapshot = {
   provinceMovements: ProvinceMovement[];
   beneficiaries: Beneficiary[];
   couriers: CashCourier[];
+  cubaOperators: CubaOperator[];
+  cubaThreads: CubaThread[];
+  cubaMessages: CubaMessage[];
 };

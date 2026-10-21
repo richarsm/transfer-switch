@@ -8,6 +8,7 @@ import {
 
 type Props = {
   isAdmin: boolean;
+  trackingCode?: string;
   cubaCardNumber: string;
   cubaRecipientName: string;
   cubaPhone: string;
@@ -16,14 +17,17 @@ type Props = {
     cubaRecipientName: string;
     cubaPhone: string;
   }) => void;
+  onManualSend?: (text: string) => void;
 };
 
 export function TransferWhatsAppPanel({
   isAdmin,
+  trackingCode = "",
   cubaCardNumber,
   cubaRecipientName,
   cubaPhone,
   onSave,
+  onManualSend,
 }: Props) {
   const [card, setCard] = useState(formatCardNumber(cubaCardNumber));
   const [name, setName] = useState(cubaRecipientName);
@@ -36,7 +40,7 @@ export function TransferWhatsAppPanel({
     setMobile(cubaPhone);
   }, [cubaCardNumber, cubaRecipientName, cubaPhone]);
 
-  const payload = { card, name, mobile };
+  const payload = { card, name, mobile, code: trackingCode };
   const text = transferWhatsAppText(payload);
   const ready = canSendTransferWhatsApp(payload);
 
@@ -46,6 +50,7 @@ export function TransferWhatsAppPanel({
 
   function openWhatsApp(phone?: string) {
     persist();
+    onManualSend?.(text);
     window.open(whatsappUrl(text, phone ?? ""), "_blank", "noopener,noreferrer");
   }
 
@@ -64,7 +69,7 @@ export function TransferWhatsAppPanel({
     <section className="card">
       <h2>Confirmación por WhatsApp</h2>
       <p className="muted">
-        Datos del destinatario en Cuba. El administrador los envía en el formato de Transfermóvil.
+        Formato Transfermóvil. El código {trackingCode || "TT-xxxx"} viaja en el mensaje para emparejar la respuesta.
       </p>
       <div className="grid-2">
         <label className="field">

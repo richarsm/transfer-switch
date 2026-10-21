@@ -61,6 +61,8 @@ const opening: Opening = {
 export function seedSnapshot(): Snapshot {
   return {
     profiles: [admin, operator],
+    accessRequests: [],
+    settings: { advisorCommissionPercent: 6 },
     sessionUserId: null,
     openings: [opening],
     cards: [
@@ -145,5 +147,8 @@ export function seedSnapshot(): Snapshot {
     provinceMovements: [],
     beneficiaries: [],
     couriers: [],
+    cubaOperators: [],
+    cubaThreads: [],
+    cubaMessages: [],
   };
 }

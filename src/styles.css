@@ -23,7 +23,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #root { margin: 0; min-height: 100%; }
+html, body, #root { margin: 0; height: 100%; }
 button, input, select, textarea { font: inherit; color: inherit; }
 a { color: inherit; }
 
@@ -37,7 +37,9 @@ h1, h2, h3 {
 .app-shell {
   display: grid;
   grid-template-columns: 260px 1fr;
-  min-height: 100vh;
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .sidebar {
@@ -47,6 +49,8 @@ h1, h2, h3 {
   display: flex;
   flex-direction: column;
   gap: 28px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .brand {
@@ -117,12 +121,19 @@ h1, h2, h3 {
   font-size: 13px;
   color: #c5d5cc;
 }
+.side-email {
+  display: inline-block;
+  word-break: break-all;
+  color: var(--gold-2);
+}
 
 .main {
   padding: 28px 36px 48px;
   display: flex;
   flex-direction: column;
   gap: 22px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .topbar {
@@ -178,6 +189,12 @@ h1, h2, h3 {
   margin-bottom: 4px;
 }
 .stat span { color: var(--ink-soft); font-size: 13px; }
+.stat-sub {
+  display: block;
+  font-size: 18px;
+  margin: 0 0 4px;
+  color: var(--ink);
+}
 
 .card {
   background: var(--white);
@@ -500,6 +517,13 @@ label.field textarea { min-height: 80px; resize: vertical; }
   border-radius: 8px;
 }
 
+.notice {
+  background: #dcefe4;
+  color: var(--ok);
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
 .login {
   min-height: 100vh;
   display: grid;
@@ -521,6 +545,29 @@ label.field textarea { min-height: 80px; resize: vertical; }
 }
 .login-card h1 { color: var(--gold-2); font-size: 34px; }
 .login-card p { color: #c5d5cc; margin: 0; }
+.login-card .btn.primary { width: 100%; }
+.login-card .btn.ghost { width: 100%; color: #f0d9a0; border-color: #2c5446; }
+.login-card .error { background: #3a1f1c; color: #f3c7c2; }
+.login-card .notice {
+  background: #1a3b31;
+  color: #f0d9a0;
+  font-size: 18px;
+  line-height: 1.4;
+  font-weight: 600;
+}
+.login-card label.field { color: #c5d5cc; }
+.access-alert {
+  display: block;
+  background: #3a2d12;
+  color: #f0d9a0;
+  border: 1px solid var(--gold);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-weight: 600;
+  margin: 0 0 16px;
+  text-decoration: none;
+}
+.access-alert:hover { background: #4a3a18; }
 .user-pick {
   display: flex;
   flex-direction: column;

@@ -1,30 +1,86 @@
+import { useState } from "react";
 import { useStore } from "../data/StoreContext";
+import { roleLabel } from "../lib/operations";
 
 export function LoginPage() {
-  const { snapshot, login } = useStore();
+  const { snapshot, login, cloudAuth, authNotice, pendingAuth, signInWithGoogle, logout } = useStore();
   const users = snapshot.profiles.filter((p) => p.active);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onGoogle() {
+    setBusy(true);
+    setError(null);
+    try {
+      await signInWithGoogle();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo entrar con Google.");
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="login">
       <div className="login-card">
         <div className="brand">
-          <strong>Transfer Switch</strong>
+          <strong>T-Transfer</strong>
         </div>
-        <h1>Entrar al escritorio</h1>
-        <p>
-          Google Sign-In se conecta cuando haya proyecto Supabase. Por ahora
-          entra con un usuario autorizado por el administrador.
-        </p>
-        <div className="user-pick">
-          {users.map((u) => (
-            <button key={u.id} type="button" onClick={() => login(u.id)}>
-              {u.displayName}
-              <small>
-                {u.email} · {u.role === "admin" ? "administrador" : "operador"}
-              </small>
+        {cloudAuth && pendingAuth ? (
+          <>
+            <h1>Solicitud enviada</h1>
+            <div className="notice">
+              Solicitud enviada, espere a ser autorizado por un administrador.
+            </div>
+            <p>
+              Entraste con <strong>{pendingAuth.email}</strong>. Cuando el administrador apruebe el
+              acceso y asigne el rol, podrás usar el escritorio.
+            </p>
+            <button className="btn ghost" type="button" onClick={() => logout()}>
+              Usar otra cuenta
             </button>
-          ))}
-        </div>
+          </>
+        ) : (
+          <>
+            <h1>Entrar al escritorio</h1>
+            {cloudAuth ? (
+              <>
+                <p>
+                  Entra con Google. Si aún no tienes perfil, se envía la solicitud al administrador.
+                </p>
+                {authNotice ? <div className="error">{authNotice}</div> : null}
+                {error ? <div className="error">{error}</div> : null}
+                <button className="btn primary" type="button" disabled={busy} onClick={() => void onGoogle()}>
+                  {busy ? "Redirigiendo…" : "Entrar con Google"}
+                </button>
+              </>
+            ) : (
+              <>
+                <p>Sin Supabase, entra con un usuario local autorizado.</p>
+                {error ? <div className="error">{error}</div> : null}
+                <div className="user-pick">
+                  {users.map((u) => (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => {
+                        try {
+                          login(u.id);
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : "No se pudo entrar.");
+                        }
+                      }}
+                    >
+                      {u.displayName}
+                      <small>
+                        {u.email} · {roleLabel(u.role)}
+                      </small>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
